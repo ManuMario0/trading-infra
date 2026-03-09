@@ -1,0 +1,213 @@
+   0.024108141s  INFO prepare_target{force=false package_id=forge v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/forge) target="forge"}: cargo::core::compiler::fingerprint: fingerprint error for forge v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/forge)/Check { test: false }/TargetInner { name: "forge", doc: true, ..: with_path("/Users/emmanuel/Development/trading/trading-infra/crates/forge/src/main.rs", Edition2024) }
+   0.024445447s  INFO prepare_target{force=false package_id=forge v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/forge) target="forge"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/forge-e3db91049cf0f17a/bin-forge`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   0.068531467s  INFO prepare_target{force=false package_id=forge v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/forge) target="forge"}: cargo::core::compiler::fingerprint: fingerprint error for forge v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/forge)/Check { test: true }/TargetInner { name: "forge", doc: true, ..: with_path("/Users/emmanuel/Development/trading/trading-infra/crates/forge/src/main.rs", Edition2024) }
+   0.068550865s  INFO prepare_target{force=false package_id=forge v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/forge) target="forge"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/forge-1ab96b3067624515/test-bin-forge`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   0.068899569s  INFO prepare_target{force=false package_id=ipc v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/ipc) target="ipc"}: cargo::core::compiler::fingerprint: fingerprint error for ipc v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/ipc)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("ipc", ["lib"], "/Users/emmanuel/Development/trading/trading-infra/crates/ipc/src/lib.rs", Edition2024) }
+   0.068917097s  INFO prepare_target{force=false package_id=ipc v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/ipc) target="ipc"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/ipc-2832e8cbd8d6003c/lib-ipc`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   0.069230527s  INFO prepare_target{force=false package_id=ipc v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/ipc) target="ipc"}: cargo::core::compiler::fingerprint: fingerprint error for ipc v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/ipc)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("ipc", ["lib"], "/Users/emmanuel/Development/trading/trading-infra/crates/ipc/src/lib.rs", Edition2024) }
+   0.069242751s  INFO prepare_target{force=false package_id=ipc v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/ipc) target="ipc"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/ipc-828477ad1b6246cc/test-lib-ipc`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   0.069540845s  INFO prepare_target{force=false package_id=logger v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/logger) target="logger"}: cargo::core::compiler::fingerprint: fingerprint error for logger v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/logger)/Check { test: false }/TargetInner { name: "logger", doc: true, ..: with_path("/Users/emmanuel/Development/trading/trading-infra/crates/logger/src/main.rs", Edition2024) }
+   0.069552230s  INFO prepare_target{force=false package_id=logger v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/logger) target="logger"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/logger-db94ea9154605758/bin-logger`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   0.069847948s  INFO prepare_target{force=false package_id=logger v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/logger) target="logger"}: cargo::core::compiler::fingerprint: fingerprint error for logger v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/logger)/Check { test: true }/TargetInner { name: "logger", doc: true, ..: with_path("/Users/emmanuel/Development/trading/trading-infra/crates/logger/src/main.rs", Edition2024) }
+   0.069858827s  INFO prepare_target{force=false package_id=logger v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/logger) target="logger"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/logger-916a7e501f246fa6/test-bin-logger`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   0.070157754s  INFO prepare_target{force=false package_id=orchestrator v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator) target="orchestrator"}: cargo::core::compiler::fingerprint: fingerprint error for orchestrator v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator)/Check { test: false }/TargetInner { name: "orchestrator", doc: true, ..: with_path("/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator/src/main.rs", Edition2024) }
+   0.070170767s  INFO prepare_target{force=false package_id=orchestrator v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator) target="orchestrator"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/orchestrator-c5371b537f778acc/bin-orchestrator`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   0.070708020s  INFO prepare_target{force=false package_id=orchestrator v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator) target="orchestrator"}: cargo::core::compiler::fingerprint: fingerprint error for orchestrator v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator)/Check { test: true }/TargetInner { name: "orchestrator", doc: true, ..: with_path("/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator/src/main.rs", Edition2024) }
+   0.070722412s  INFO prepare_target{force=false package_id=orchestrator v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator) target="orchestrator"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/emmanuel/Development/trading/trading-infra/target/debug/.fingerprint/orchestrator-f9dab039d9c0145e/test-bin-orchestrator`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+    Checking forge v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/forge)
+    Checking orchestrator v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/orchestrator)
+    Checking ipc v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/ipc)
+    Checking logger v0.1.0 (/Users/emmanuel/Development/trading/trading-infra/crates/logger)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.46s
