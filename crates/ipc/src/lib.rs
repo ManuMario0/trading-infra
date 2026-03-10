@@ -1,4 +1,5 @@
 pub mod address;
-pub mod backends;
 pub mod socket;
-pub mod transport;
+
+pub(crate) mod backends;
+pub(crate) mod transport;

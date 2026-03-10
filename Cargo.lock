@@ -104,6 +104,11 @@ dependencies = [
 [[package]]
 name = "logger"
 version = "0.1.0"
+dependencies = [
+ "ipc",
+ "tokio",
+ "trading-sdk",
+]
 
 [[package]]
 name = "mio"
@@ -288,6 +293,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "trading-sdk"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ManuMario0/trading-sdk.git?branch=main#f0f5b2d91e4ceb8a076578747bc85595a4626163"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
