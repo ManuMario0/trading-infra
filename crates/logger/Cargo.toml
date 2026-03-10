@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }
 ipc = { path = "../ipc" }
-tokio = { version = "1.50.0", features = ["net", "rt", "rt-multi-thread", "io-util", "macros", "sync"] }
+tokio = { version = "1.50.0", features = ["net", "rt", "rt-multi-thread", "io-util", "macros", "sync", "time"] }

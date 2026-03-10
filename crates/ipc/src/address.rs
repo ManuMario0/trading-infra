@@ -32,7 +32,7 @@ impl Address {
     ///
     /// A `Address::TCP` variant.
     pub fn tcp(ip: &str, port: u16) -> Self {
-        Address::TCP(format!("tcp://{}:{}", ip, port))
+        Address::TCP(format!("{}:{}", ip, port))
     }
 }
 
@@ -47,7 +47,7 @@ impl fmt::Display for Address {
 
 impl Default for Address {
     fn default() -> Self {
-        Address::TCP("tcp://127.0.0.1:5555".to_string())
+        Address::TCP("127.0.0.1:5555".to_string())
     }
 }
 
