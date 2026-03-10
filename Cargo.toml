@@ -4,5 +4,6 @@ members = [
     "crates/forge",
     "crates/orchestrator",
     "crates/logger",
+    "crates/service",
 ]
 resolver = "2"
