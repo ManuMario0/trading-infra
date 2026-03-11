@@ -1,11 +1,16 @@
-//! Scaffolds a temporary build workspace from a template directory.
+//! Scaffolds a temporary build workspace from a wrapper crate.
+//!
+//! Instead of copying template files, this module generates a thin `main.rs`
+//! and `Cargo.toml` that wire the user module into the corresponding wrapper
+//! library crate. All complex wrapper logic lives in the wrapper crate itself.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::manifest::ModuleManifest;
 
-/// Prepares a build directory from a template, injecting the target module as a dependency.
+/// Prepares a build directory by generating a thin glue crate that connects
+/// the user module to the corresponding wrapper library.
 ///
 /// Returns the path to the build directory on success.
 pub fn scaffold(
@@ -18,43 +23,78 @@ pub fn scaffold(
         .join("forge")
         .join(&module.name);
 
-    // Clean and recreate the build directory
-    if build_dir.exists() {
-        fs::remove_dir_all(&build_dir).unwrap();
+    // Only clean src/ and Cargo.toml to preserve cached dependencies in target/
+    let build_src = build_dir.join("src");
+    if build_src.exists() {
+        fs::remove_dir_all(&build_src).unwrap();
     }
-    fs::create_dir_all(&build_dir).unwrap();
-    fs::create_dir_all(build_dir.join("src")).unwrap();
+    let build_cargo = build_dir.join("Cargo.toml");
+    if build_cargo.exists() {
+        fs::remove_file(&build_cargo).unwrap();
+    }
+    fs::create_dir_all(&build_src).unwrap();
 
-    // Locate the template for this module type
-    let template_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("templates")
+    // Verify a wrapper crate exists for this module type
+    let wrapper_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("wrappers")
         .join(&module.module_type);
 
-    if !template_dir.exists() {
+    if !wrapper_dir.exists() {
         eprintln!(
-            "Error: No forge template exists for type '{}'",
+            "Error: No forge wrapper exists for type '{}'",
             module.module_type
         );
         return None;
     }
 
-    // Generate Cargo.toml with injected dependency
-    let template_manifest = fs::read_to_string(template_dir.join("Cargo.toml")).unwrap();
-    let dependency_injection = format!(
-        "\n{} = {{ path = \"{}\" }}\n",
-        module.name,
-        target_dir.display()
-    );
-    let final_manifest = template_manifest
-        .replace("multiplexer-wrapper", &format!("{}-wrapper", module.name))
-        + &dependency_injection;
-    fs::write(build_dir.join("Cargo.toml"), final_manifest).unwrap();
-
-    // Generate src/main.rs with injected crate name
-    let template_src = fs::read_to_string(template_dir.join("src").join("main.rs")).unwrap();
     let crate_name = module.name.replace("-", "_");
-    let final_src = template_src.replace("__target_module__", &crate_name);
-    fs::write(build_dir.join("src").join("main.rs"), final_src).unwrap();
+    let wrapper_crate = format!("{}-wrapper", module.module_type);
+    let wrapper_crate_ident = wrapper_crate.replace("-", "_");
+
+    // Generate the thin main.rs that wires user module → wrapper
+    let main_rs = format!(
+        "\
+use {crate_name}::entry_point;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {{
+    {wrapper_crate_ident}::run(
+        entry_point(),
+        {wrapper_crate_ident}::ModuleInfo {{
+            name: \"{name}\",
+            version: \"{version}\",
+            description: \"{description}\",
+        }},
+    ).await
+}}
+",
+        name = module.name,
+        version = module.version,
+        description = module.description.escape_default(),
+    );
+    fs::write(build_src.join("main.rs"), main_rs).unwrap();
+
+    // Generate Cargo.toml with dependencies on the wrapper and user module
+    let cargo_toml = format!(
+        "\
+[package]
+name = \"{name}-forged\"
+version = \"0.1.0\"
+edition = \"2024\"
+
+[workspace]
+
+[dependencies]
+tokio = {{ version = \"1.43.0\", features = [\"full\"] }}
+{wrapper_crate} = {{ path = \"{wrapper}\" }}
+{name} = {{ path = \"{target}\" }}
+",
+        name = module.name,
+        wrapper_crate = wrapper_crate,
+        wrapper = wrapper_dir.display(),
+        target = target_dir.display(),
+    );
+    fs::write(build_dir.join("Cargo.toml"), cargo_toml).unwrap();
 
     Some(build_dir)
 }

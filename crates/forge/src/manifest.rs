@@ -9,6 +9,10 @@ use toml::Value;
 pub struct ModuleManifest {
     /// The package name (e.g., "kelly-multiplexer").
     pub name: String,
+    /// The package version (e.g., "0.1.0").
+    pub version: String,
+    /// The package description, or empty if not provided.
+    pub description: String,
     /// The module type from [package.metadata.trading] (e.g., "multiplexer").
     pub module_type: String,
 }
@@ -30,6 +34,12 @@ pub fn parse_manifest(target_dir: &Path) -> Option<ModuleManifest> {
     });
 
     let package_name = manifest["package"]["name"].as_str().unwrap().to_string();
+    let package_version = manifest["package"]["version"].as_str().unwrap().to_string();
+    let package_description = manifest["package"]
+        .get("description")
+        .and_then(|d| d.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let module_type = manifest
         .get("package")
@@ -42,6 +52,8 @@ pub fn parse_manifest(target_dir: &Path) -> Option<ModuleManifest> {
     match module_type {
         Some(module_type) => Some(ModuleManifest {
             name: package_name,
+            version: package_version,
+            description: package_description,
             module_type,
         }),
         None => {

@@ -34,9 +34,7 @@ pub async fn run_cli(app: &mut App) {
 
                 let service_path = std::path::PathBuf::from(path_input.trim());
                 let cmd_kind = CommandKind::Deploy(DeployCommand { service_path });
-                let cmd = CommandEvent { kind: cmd_kind };
-                let event = JournalEvent::OrchestratorEvent(OrchestratorEvent::Command(cmd));
-                app.journal.log(vec![], event).await.unwrap();
+                app.process_command(cmd_kind).await;
                 println!("-> Built Command: Deploy");
             }
             "2" => {

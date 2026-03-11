@@ -26,7 +26,7 @@ use crate::env::{IPC_INPUT, IPC_OUTPUT};
 /// A service should be self descriptive, that is, a service should output
 /// the manifest in stdout and yield if some expected environemnt variable
 /// does not exists.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Manifest {
     pub blueprint: Blueprint,
     pub name: String,

@@ -26,7 +26,7 @@ impl Multiplexist for KellyMultiplexer {
 
 impl Initiable for KellyMultiplexer {
     fn init() -> Self {
-        todo!()
+        Self {}
     }
 }
 
