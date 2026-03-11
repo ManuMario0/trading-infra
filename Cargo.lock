@@ -93,6 +93,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
+name = "journal"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "service",
+ "trading-sdk",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.183"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -112,6 +121,9 @@ name = "logger"
 version = "0.1.0"
 dependencies = [
  "ipc",
+ "journal",
+ "serde_json",
+ "service",
  "tokio",
  "trading-sdk",
 ]
@@ -136,6 +148,13 @@ dependencies = [
 [[package]]
 name = "orchestrator"
 version = "0.1.0"
+dependencies = [
+ "ipc",
+ "journal",
+ "service",
+ "tokio",
+ "trading-sdk",
+]
 
 [[package]]
 name = "pin-project-lite"
@@ -245,6 +264,7 @@ dependencies = [
  "ipc",
  "serde",
  "serde_json",
+ "trading-sdk",
 ]
 
 [[package]]
@@ -332,7 +352,7 @@ dependencies = [
 [[package]]
 name = "trading-sdk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ManuMario0/trading-sdk.git?branch=main#f0f5b2d91e4ceb8a076578747bc85595a4626163"
+source = "git+ssh://git@github.com/ManuMario0/trading-sdk.git?branch=main#ccef4520b69330c6ffbf0a539f2ffa3b5511aa6d"
 dependencies = [
  "serde",
 ]

@@ -7,3 +7,6 @@ edition = "2024"
 trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }
 ipc = { path = "../ipc" }
 tokio = { version = "1.50.0", features = ["net", "rt", "rt-multi-thread", "io-util", "macros", "sync", "time"] }
+journal = { path = "../journal" }
+serde_json = "1.0.149"
+service = { path = "../service" }

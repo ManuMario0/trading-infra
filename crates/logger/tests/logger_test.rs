@@ -1,12 +1,14 @@
 //!  Spawn a logger and a publisher and test the communication.
 
 use ipc::{address::Address, socket::PushSocket};
+use journal::{entry::JournalEntry, event::JournalEvent};
 use logger::network;
+use service::identity::Identity;
 use tokio::time::sleep;
 use trading_sdk::{
-    identity::{AgentId, Identity},
+    identity::ServiceId,
     journal::{
-        event::{JournalEntry, JournalEvent, LogLevel},
+        event::{LogLevel, ServiceEvent},
         lineage::LineageId,
     },
 };
@@ -19,17 +21,21 @@ async fn test_logger() {
     });
     sleep(std::time::Duration::from_millis(100)).await;
 
-    let journal_event = JournalEvent::Annotation {
+    let journal_event = JournalEvent::ServiceEvent(ServiceEvent::Annotation {
         level: LogLevel::Info,
         message: "test".to_string(),
-    };
+    });
     let journal_entry = JournalEntry {
-        lineage_id: LineageId::new(0),
+        lineage_id: LineageId(0),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis(),
-        source: Identity::new("test", "0.0.1", AgentId::new(0)),
+        source: Identity {
+            name: "test".to_string(),
+            version: "0.0.1".to_string(),
+            identifier: ServiceId::new(0),
+        },
         parents: Vec::new(),
         event: journal_event,
     };

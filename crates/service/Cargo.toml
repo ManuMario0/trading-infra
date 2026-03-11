@@ -7,3 +7,4 @@ edition = "2024"
 serde = "1.0.228"
 ipc = { path = "../ipc" }
 serde_json = "1.0.149"
+trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }

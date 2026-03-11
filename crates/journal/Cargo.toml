@@ -1,0 +1,9 @@
+[package]
+name = "journal"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = "1.0.228"
+trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }
+service = { path = "../service" }

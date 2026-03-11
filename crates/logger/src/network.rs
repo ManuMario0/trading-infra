@@ -1,7 +1,7 @@
 //! Network connectivity.
 
 use ipc::{address::Address, socket::PullSocket};
-use trading_sdk::journal::event::JournalEntry;
+use journal::entry::JournalEntry;
 
 pub struct Network {
     socket: PullSocket<JournalEntry>,
