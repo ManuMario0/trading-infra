@@ -1,12 +1,10 @@
 //! Core application state for the orchestrator.
 
+use journal::journal::Journal;
 use tokio::time;
 
 use ipc::address::Address;
-use ipc::socket::PushSocket;
-use journal::entry::JournalEntry;
 use journal::event::JournalEvent;
-use journal::lineage::LineageIdGenerator;
 use service::env::parse_or;
 use service::identity::Identity;
 use service::make_identity;
@@ -20,10 +18,7 @@ pub struct App {
     pub identity: Identity,
     pub service_allocator: ServiceIdAllocator,
     pub port_allocator: Allocator,
-    pub lineage_generator: LineageIdGenerator,
-
-    // Connections
-    pub logger: PushSocket<JournalEntry>,
+    pub journal: Journal,
 }
 
 impl App {
@@ -73,14 +68,11 @@ impl App {
         // Connect to the logger via TCP
         let logger_ipc_address = Address::tcp("127.0.0.1", logger_port.0);
         time::sleep(time::Duration::from_millis(100)).await;
-        let logger_socket: Result<PushSocket<JournalEntry>, _> =
-            // Retry a few times while logger boots
-            PushSocket::connect(logger_ipc_address).await;
 
-        let mut logger_socket = logger_socket.expect("Failed to bind IPC socket to logger");
-
-        // Setup our lineage ID generator.
-        let mut lineage_id_generator = LineageIdGenerator::new(orchestrator_service_id);
+        // Create journal
+        let mut journal = Journal::new(orchestrator_identity.clone(), logger_ipc_address)
+            .await
+            .expect("Failed to bind IPC socket to logger");
 
         // Record Lifecycle Events
         let startup_event = JournalEvent::OrchestratorEvent(
@@ -90,13 +82,7 @@ impl App {
                 },
             ),
         );
-        let startup_entry = JournalEntry::make_entry(
-            lineage_id_generator.next(),
-            orchestrator_identity.clone(),
-            Vec::new(),
-            startup_event,
-        );
-        logger_socket.send(&startup_entry).await.unwrap();
+        journal.log(vec![], startup_event).await.unwrap();
 
         let logger_spawn_event = JournalEvent::OrchestratorEvent(
             journal::event::orchestrator::OrchestratorEvent::Lifecycle(
@@ -107,13 +93,7 @@ impl App {
                 },
             ),
         );
-        let logger_spawn_entry = JournalEntry::make_entry(
-            lineage_id_generator.next(),
-            orchestrator_identity.clone(),
-            Vec::new(),
-            logger_spawn_event,
-        );
-        logger_socket.send(&logger_spawn_entry).await.unwrap();
+        journal.log(vec![], logger_spawn_event).await.unwrap();
 
         // Create a new allocator for the ports.
         // The allocator will be used to allocate ports for the services.
@@ -123,8 +103,7 @@ impl App {
             identity: orchestrator_identity,
             service_allocator: service_id_allocator,
             port_allocator: allocator,
-            lineage_generator: lineage_id_generator,
-            logger: logger_socket,
+            journal,
         }
     }
 }

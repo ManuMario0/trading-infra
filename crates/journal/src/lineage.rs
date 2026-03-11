@@ -3,7 +3,7 @@
 //! The lineage ID is a unique identifier for a causal chain of events.
 //! It is formed as follows;
 //!
-//! ```
+//! ```ignore
 //! <service_id>-<counter>
 //! ```
 

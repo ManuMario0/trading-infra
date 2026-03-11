@@ -4,6 +4,8 @@ members = [
     "crates/forge",
     "crates/orchestrator",
     "crates/logger",
-    "crates/service", "crates/journal",
+    "crates/service",
+    "crates/journal",
+    "crates/modules/kelly-multiplexer",
 ]
 resolver = "2"

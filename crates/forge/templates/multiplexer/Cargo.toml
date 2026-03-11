@@ -1,0 +1,16 @@
+[package]
+name = "multiplexer-wrapper"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+tokio = { version = "1.43.0", features = ["full"] }
+service = { path = "../../../crates/service" }
+journal = { path = "../../../crates/journal" }
+ipc = { path = "../../../crates/ipc" }
+trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }
+
+# Injected by Forge
+# __target_module__ = { path = "__target_path__" }

@@ -2,7 +2,6 @@
 
 use std::io::{self, Write};
 
-use journal::entry::JournalEntry;
 use journal::event::JournalEvent;
 use journal::event::orchestrator::{
     CommandEvent, CommandKind, DeployCommand, OrchestratorEvent, StopCommand,
@@ -37,13 +36,7 @@ pub async fn run_cli(app: &mut App) {
                 let cmd_kind = CommandKind::Deploy(DeployCommand { service_path });
                 let cmd = CommandEvent { kind: cmd_kind };
                 let event = JournalEvent::OrchestratorEvent(OrchestratorEvent::Command(cmd));
-                let entry = JournalEntry::make_entry(
-                    app.lineage_generator.next(),
-                    app.identity.clone(),
-                    Vec::new(),
-                    event,
-                );
-                app.logger.send(&entry).await.unwrap();
+                app.journal.log(vec![], event).await.unwrap();
                 println!("-> Built Command: Deploy");
             }
             "2" => {
@@ -58,13 +51,7 @@ pub async fn run_cli(app: &mut App) {
                         let cmd = CommandEvent { kind: cmd_kind };
                         let event =
                             JournalEvent::OrchestratorEvent(OrchestratorEvent::Command(cmd));
-                        let entry = JournalEntry::make_entry(
-                            app.lineage_generator.next(),
-                            app.identity.clone(),
-                            Vec::new(),
-                            event,
-                        );
-                        app.logger.send(&entry).await.unwrap();
+                        app.journal.log(vec![], event).await.unwrap();
                         println!("-> Built Command: Stop (ID: {})", service_id);
                     }
                     Err(_) => println!("-> Error: Invalid ID provided. Must be a number."),
