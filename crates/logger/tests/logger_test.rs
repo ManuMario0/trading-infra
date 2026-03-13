@@ -37,6 +37,7 @@ async fn test_logger() {
             identifier: ServiceId::new(0),
         },
         parents: Vec::new(),
+        log_level: journal::entry::LogLevel::Info,
         event: journal_event,
     };
 

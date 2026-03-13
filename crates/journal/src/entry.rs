@@ -17,6 +17,8 @@ pub struct JournalEntry {
     pub source: Identity,
     /// Correlation ID — ties together events in the same causal chain
     pub parents: Vec<LineageId>,
+    /// Level of gravity of the entry
+    pub log_level: LogLevel,
     /// The actual event payload
     pub event: JournalEvent,
 }
@@ -26,6 +28,7 @@ impl JournalEntry {
         lineage_id: LineageId,
         source: Identity,
         parents: Vec<LineageId>,
+        log_level: LogLevel,
         event: JournalEvent,
     ) -> Self {
         Self {
@@ -36,7 +39,15 @@ impl JournalEntry {
                 .as_millis(),
             source,
             parents,
+            log_level,
             event,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
 }

@@ -5,7 +5,7 @@ use ipc::socket::PushSocket;
 use service::identity::Identity;
 use trading_sdk::journal::lineage::LineageId;
 
-use crate::entry::JournalEntry;
+use crate::entry::{JournalEntry, LogLevel};
 use crate::event::JournalEvent;
 use crate::lineage::LineageIdGenerator;
 
@@ -35,11 +35,12 @@ impl Journal {
     pub async fn log(
         &mut self,
         parents: Vec<LineageId>,
+        log_level: LogLevel,
         event: JournalEvent,
     ) -> Result<LineageId, std::io::Error> {
         let lineage_id = self.lineage_id_generator.next();
         let journal_entry =
-            JournalEntry::make_entry(lineage_id, self.identity.clone(), parents, event);
+            JournalEntry::make_entry(lineage_id, self.identity.clone(), parents, log_level, event);
         self.logger_ipc_connection.send(&journal_entry).await?;
         Ok(lineage_id)
     }

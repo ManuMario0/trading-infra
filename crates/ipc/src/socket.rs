@@ -8,6 +8,7 @@
 use std::io;
 use std::marker::PhantomData;
 
+use serde::Deserialize;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -136,4 +137,17 @@ where
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.conn.send_bytes(&bytes).await
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketKind {
+    Broadcast,
+    Aggregate,
+    PointToPoint,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketRole {
+    Bind,
+    Connect,
 }

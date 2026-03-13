@@ -39,7 +39,7 @@ impl Address {
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Address::TCP(addr) => write!(f, "TCP:{}", addr),
+            Address::TCP(addr) => write!(f, "tcp://{}", addr),
             Address::Empty => write!(f, "empty"),
         }
     }
@@ -55,12 +55,11 @@ impl FromStr for Address {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(stripped) = s.strip_prefix("TCP:") {
-            Ok(Address::TCP(stripped.to_string()))
+        if let Some(stripped) = s.strip_prefix("tcp://") {
+            let addr = stripped.to_string();
+            Ok(Address::TCP(addr))
         } else if s == "empty" {
             Ok(Address::Empty)
-        } else if s.starts_with("tcp://") {
-            Ok(Address::TCP(s.to_string()))
         } else {
             Err(format!("Unknown address format: {}", s))
         }

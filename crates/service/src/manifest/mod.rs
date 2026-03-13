@@ -10,9 +10,12 @@
 //! and must not be specify in the manifest. For example, the environment variable
 //! `IPC_LOGGER` is always set and can be used safely to setup the logger.
 
-use std::{env, process::exit, str::FromStr};
+use std::env;
+use std::process::exit;
+use std::str::FromStr;
 
 use ipc::address::Address;
+use ipc::socket::{SocketKind, SocketRole};
 use serde::{Deserialize, Serialize};
 
 use crate::env::{IPC_INPUT, IPC_OUTPUT};
@@ -113,12 +116,24 @@ impl Blueprint {
 pub struct PortDefinition {
     name: String,
     pub data_type: String,
+    pub kind: SocketKind,
+    pub role: SocketRole,
 }
 
 impl PortDefinition {
-    pub fn new(name: String, data_type: String) -> PortDefinition {
+    pub fn new(
+        name: String,
+        data_type: String,
+        kind: SocketKind,
+        role: SocketRole,
+    ) -> PortDefinition {
         assert!(name.chars().all(|c| c.is_ascii_uppercase() || c == '_'));
-        PortDefinition { name, data_type }
+        PortDefinition {
+            name,
+            data_type,
+            kind,
+            role,
+        }
     }
 
     pub const fn name<'a>(&'a self) -> &'a String {

@@ -1,7 +1,11 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
+use ipc::address::Address;
 use serde::{Deserialize, Serialize};
 use service::manifest::Manifest;
+use trading_sdk::identity::ServiceId;
+
+use crate::event::{context::Context, runtime::RuntimeErrorKind};
 
 #[derive(Serialize, Deserialize)]
 pub enum OrchestratorEvent {
@@ -14,55 +18,34 @@ pub enum LifecycleEvent {
     Startup {
         working_dir: String,
     },
-    LoggerSpawned {
-        service_id: u32,
-        assigned_dir: String,
-    },
     ServiceSpawned {
-        service_id: u32,
+        // Who is the service
+        path: PathBuf,
+        // Identifier attributed
+        service_id: ServiceId,
+        // Manifest of the service
         service_manifest: Manifest,
     },
-    ServiceSpawnFailed {
-        error: ServiceBootError,
-    },
+    ServiceSpawnFailed(ServiceBootError),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum ServiceBootError {
-    SpawnFailed {
-        path: PathBuf,
-        os_error_code: Option<i32>,
-        reason: String,
-    },
-    ManifestTimeout {
-        path: PathBuf,
-    },
-    StdoutCaptureFailed {
-        path: PathBuf,
-    },
-    ManifestParseError {
-        path: PathBuf,
-        reason: String,
-    },
+pub struct ServiceBootError {
+    // Who is the service
+    pub path: PathBuf,
+    // What was the service asked to do
+    pub context: Context,
+    // What went wrong
+    pub kind: RuntimeErrorKind,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct CommandEvent {
-    pub kind: CommandKind,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub enum CommandKind {
-    Deploy(DeployCommand),
-    Stop(StopCommand),
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct DeployCommand {
-    pub service_path: PathBuf,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct StopCommand {
-    pub service_id: usize,
+pub enum CommandEvent {
+    Deploy {
+        service_path: PathBuf,
+        addr_map: BTreeMap<String, Address>,
+    },
+    Stop {
+        service_id: u32,
+    },
 }

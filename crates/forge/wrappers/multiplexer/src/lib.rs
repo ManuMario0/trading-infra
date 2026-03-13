@@ -10,10 +10,11 @@
 pub mod manifest;
 pub mod port;
 
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use ipc::address::Address;
 use journal::{
+    entry::LogLevel,
     event::{
         JournalEvent,
         service::{ServiceEventKind, ServiceLifetimeEvent},
@@ -55,8 +56,9 @@ pub async fn run(
     let service_identity = Identity::new(info.name, info.version, service_id);
 
     // Setup the journal.
-    let logger_port = env::parse_or(env::IPC_LOGGER, 5555);
-    let logger_addr = Address::tcp("127.0.0.1", logger_port);
+    let logger_addr_str: String =
+        env::parse_or(env::IPC_LOGGER_ADDR, "tcp://127.0.0.1:5555".to_string());
+    let logger_addr = Address::from_str(&logger_addr_str).unwrap();
     let mut journal = Journal::new(service_identity, logger_addr).await.unwrap();
 
     let startup_service_event = ServiceLifetimeEvent {
@@ -64,7 +66,10 @@ pub async fn run(
         kind: ServiceEventKind::Startup,
     };
     let startup_event = JournalEvent::ServiceLifetimeEvent(startup_service_event);
-    journal.log(vec![], startup_event).await.unwrap(); // crash if connections is already down
+    journal
+        .log(vec![], LogLevel::Info, startup_event)
+        .await
+        .unwrap(); // crash if connections is already down
 
     println!("Starting Multiplexer Wrapper...");
 

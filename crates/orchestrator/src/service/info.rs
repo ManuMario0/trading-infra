@@ -1,7 +1,9 @@
 use std::process::Child;
 
-use service::manifest::Manifest;
 use trading_sdk::identity::ServiceId;
+
+use ipc::address::Address;
+use service::manifest::Manifest;
 
 /// Informations about a running service.
 ///
@@ -11,4 +13,6 @@ pub struct ServiceInfo {
     pub handle: Child,
     pub identifier: ServiceId,
     pub manifest: Manifest,
+    pub input_ports: Vec<Address>,
+    pub output_ports: Vec<Address>,
 }
