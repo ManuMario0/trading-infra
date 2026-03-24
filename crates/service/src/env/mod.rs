@@ -34,8 +34,8 @@ pub const NODE_ID: &str = "NODE_ID";
 /// Working directory for microservices to read/write persistent data.
 pub const WORKING_DIR: &str = "WORKING_DIR";
 
-/// File path to the logger executable (needed by the orchestrator to spawn the logger).
-pub const SYSTEM_LOGGER_BIN: &str = "SYSTEM_LOGGER_BIN";
+/// Directory for logging.
+pub const LOGGING_DIR: &str = "LOGGING_DIR";
 
 /// Port range for the service.
 pub const PORT_RANGE_MIN: &str = "PORT_RANGE_MIN";
@@ -50,10 +50,16 @@ pub fn parse_or<T: FromStr>(env: &str, default: T) -> T {
 
 pub fn parse_ipc_input_addr(field_name: &str) -> Address {
     let env_name = format!("{}_{}", IPC_INPUT, field_name);
-    parse_or(&env_name, Address::Empty)
+    env::var(&env_name)
+        .ok()
+        .and_then(|s| s.parse::<Address>().ok())
+        .unwrap_or_else(|| panic!("Missing required env var '{}'.", env_name))
 }
 
 pub fn parse_ipc_output_addr(field_name: &str) -> Address {
     let env_name = format!("{}_{}", IPC_OUTPUT, field_name);
-    parse_or(&env_name, Address::Empty)
+    env::var(&env_name)
+        .ok()
+        .and_then(|s| s.parse::<Address>().ok())
+        .unwrap_or_else(|| panic!("Missing required env var '{}'.", env_name))
 }

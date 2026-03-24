@@ -1,38 +1,30 @@
 //! Address models for network configuration.
-//!
-//! Defines the `Address` enum for abstracting over different transport protocols (ZMQ, Memory).
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::net::SocketAddr;
 use std::str::FromStr;
 
-/// Represents a network address for communication endpoints.
-///
-/// This enum allows shielding the application from specific transport implementations.
+/// A network address for a communication endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Address {
-    /// TCP connection address.
-    ///
-    /// Those containts both the IP address and the port.
+    /// TCP address (IP:port).
     TCP(String),
-
-    /// No connection (used for dynamic Multiplexers starting empty)
-    Empty,
 }
 
 impl Address {
-    /// Creates a new TCP address.
-    ///
-    /// # Arguments
-    ///
-    /// * `ip` - The IP address (e.g., "127.0.0.1").
-    /// * `port` - The TCP port.
-    ///
-    /// # Returns
-    ///
-    /// A `Address::TCP` variant.
+    /// Convenience constructor.
     pub fn tcp(ip: &str, port: u16) -> Self {
         Address::TCP(format!("{}:{}", ip, port))
+    }
+
+    /// Parse into a `std::net::SocketAddr` for use with mio/std.
+    pub fn as_socket_addr(&self) -> Result<SocketAddr, String> {
+        match self {
+            Address::TCP(s) => s
+                .parse()
+                .map_err(|e| format!("Invalid TCP address '{}': {}", s, e)),
+        }
     }
 }
 
@@ -40,7 +32,6 @@ impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Address::TCP(addr) => write!(f, "tcp://{}", addr),
-            Address::Empty => write!(f, "empty"),
         }
     }
 }
@@ -56,10 +47,7 @@ impl FromStr for Address {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(stripped) = s.strip_prefix("tcp://") {
-            let addr = stripped.to_string();
-            Ok(Address::TCP(addr))
-        } else if s == "empty" {
-            Ok(Address::Empty)
+            Ok(Address::TCP(stripped.to_string()))
         } else {
             Err(format!("Unknown address format: {}", s))
         }

@@ -20,7 +20,6 @@ impl ServiceInfo {
     pub fn startup_service(
         port_allocator: &mut Allocator,
         service_allocator: &mut ServiceIdAllocator,
-        logger_addr: Address,
         path: PathBuf,
         working_directory: Option<PathBuf>,
         overrides: BTreeMap<String, Address>,
@@ -30,18 +29,11 @@ impl ServiceInfo {
 
         let manifest = acquire_manifest(path.clone(), context.clone())?;
 
-        let input_ports = assign_ports(
+        let ports = assign_ports(
             path.clone(),
             context.clone(),
             port_allocator,
-            &manifest.blueprint.inputs,
-            &overrides,
-        )?;
-        let output_ports = assign_ports(
-            path.clone(),
-            context.clone(),
-            port_allocator,
-            &manifest.blueprint.outputs,
+            &manifest.blueprint.ports,
             &overrides,
         )?;
 
@@ -49,9 +41,7 @@ impl ServiceInfo {
         // providing it with logger addr and service id
         let service_id = service_allocator.next();
         let mut command = std::process::Command::new(&path);
-        command
-            .env(service::env::SERVICE_ID, service_id.get_inner().to_string())
-            .env(service::env::IPC_LOGGER_ADDR, logger_addr.to_string());
+        command.env(service::env::SERVICE_ID, service_id.get_inner().to_string());
 
         if let Some(working_directory) = working_directory {
             command.env(
@@ -61,13 +51,9 @@ impl ServiceInfo {
         }
 
         // Inject ports
-        for (i, port_def) in manifest.blueprint.inputs.iter().enumerate() {
+        for (i, port_def) in manifest.blueprint.all_ports().enumerate() {
             let env_name = format!("{}_{}", service::env::IPC_INPUT, port_def.name());
-            command.env(env_name, input_ports[i].to_string());
-        }
-        for (i, port_def) in manifest.blueprint.outputs.iter().enumerate() {
-            let env_name = format!("{}_{}", service::env::IPC_OUTPUT, port_def.name());
-            command.env(env_name, output_ports[i].to_string());
+            command.env(env_name, ports[i].to_string());
         }
 
         let child = command.spawn().map_err(|e| ServiceBootError {
@@ -82,8 +68,7 @@ impl ServiceInfo {
             handle: child,
             identifier: service_id,
             manifest,
-            input_ports,
-            output_ports,
+            ports,
         })
     }
 }

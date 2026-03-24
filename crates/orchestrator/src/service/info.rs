@@ -13,6 +13,5 @@ pub struct ServiceInfo {
     pub handle: Child,
     pub identifier: ServiceId,
     pub manifest: Manifest,
-    pub input_ports: Vec<Address>,
-    pub output_ports: Vec<Address>,
+    pub ports: Vec<Address>,
 }

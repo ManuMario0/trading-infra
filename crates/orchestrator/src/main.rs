@@ -1,11 +1,10 @@
 use orchestrator::app::App;
 use orchestrator::cli::run_cli;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     println!("Bootstrapping Orchestrator...");
-    let mut app = App::bootstrap().await;
+    let mut app = App::bootstrap();
 
     println!("Starting Control Interface...");
-    run_cli(&mut app).await;
+    run_cli(&mut app);
 }

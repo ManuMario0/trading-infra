@@ -1,153 +1,90 @@
-//! Typed sockets with ZMQ-like interface.
+//! Typed sockets — the user-facing handles to the IPC channels.
 //!
-//! - `PullSocket::bind(address)` — listens on an address, accepts all incoming
-//!   connections internally, and multiplexes their messages into a single `receive()`.
-//! - `PushSocket::connect(address)` — connects to a remote address and sends
-//!   typed messages through `send()`.
+//! After calling `IpcInit::build`, the caller receives a `Vec<RawSocket>`
+//! (one per port in the blueprint).  These raw handles are type-erased;
+//! wrap them in `TypedSender` / `TypedReceiver` for ergonomic use.
+//!
+//! # Direction convention
+//! - `SendSocket<T>` — user writes, network reads and sends.
+//! - `RecvSocket<T>` — network reads and writes here, user reads.
 
-use std::io;
-use std::marker::PhantomData;
+use std::sync::Arc;
 
-use serde::Deserialize;
-use serde::{Serialize, de::DeserializeOwned};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use mio::Waker;
+use serde::Serialize;
+use sync::spsc;
 
-use crate::backends::tcp::TcpConnection;
-use crate::transport::{Receiver, Sender};
+// ── Re-export so callers can use these from a single path ──────────────────
 
-/// A socket that collects (receives) typed data from all connected pushers.
-///
-/// Internally manages a TCP listener, accepts connections, and multiplexes
-/// all incoming messages into a single channel.
-pub struct PullSocket<C> {
-    rx: mpsc::Receiver<C>,
-    _phantom: PhantomData<C>,
-}
-
-impl<C> PullSocket<C>
-where
-    C: DeserializeOwned + Send + 'static,
-{
-    /// Bind to an address and start accepting connections in the background.
-    ///
-    /// All incoming messages from any connected pusher are funneled into
-    /// a single internal channel that `receive()` reads from.
-    pub async fn bind(address: crate::address::Address) -> Result<Self, io::Error> {
-        let addr_str = match &address {
-            crate::address::Address::TCP(s) => s.clone(),
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "PullSocket::bind requires Address::TCP",
-                ));
-            }
-        };
-
-        let listener = TcpListener::bind(&addr_str).await?;
-        let (tx, rx) = mpsc::channel::<C>(10_000);
-
-        // Background task: accept loop
-        tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((stream, _)) => {
-                        let tx = tx.clone();
-                        // Per-connection reader task
-                        tokio::spawn(async move {
-                            let mut conn = TcpConnection::new(stream);
-                            loop {
-                                match conn.recv_bytes().await {
-                                    Ok(bytes) => {
-                                        match postcard::from_bytes::<C>(&bytes) {
-                                            Ok(msg) => {
-                                                if tx.send(msg).await.is_err() {
-                                                    // Channel closed, stop reading
-                                                    break;
-                                                }
-                                            }
-                                            Err(e) => {
-                                                eprintln!("Deserialization error: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        // Connection closed or error
-                                        break;
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("Accept error: {}", e);
-                    }
-                }
-            }
-        });
-
-        Ok(Self {
-            rx,
-            _phantom: PhantomData,
-        })
-    }
-
-    /// Receive the next typed message from any connected pusher.
-    pub async fn receive(&mut self) -> Result<C, io::Error> {
-        self.rx.recv().await.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::ConnectionAborted, "All pushers disconnected")
-        })
-    }
-}
-
-/// A socket that pushes (sends) typed data to a remote puller.
-pub struct PushSocket<C> {
-    conn: TcpConnection,
-    _phantom: PhantomData<C>,
-}
-
-impl<C> PushSocket<C>
-where
-    C: Serialize,
-{
-    /// Connect to a remote PullSocket at the given address.
-    pub async fn connect(address: crate::address::Address) -> Result<Self, io::Error> {
-        let addr_str = match &address {
-            crate::address::Address::TCP(s) => s.clone(),
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "PushSocket::connect requires Address::TCP",
-                ));
-            }
-        };
-
-        let stream = TcpStream::connect(&addr_str).await?;
-        let conn = TcpConnection::new(stream);
-
-        Ok(Self {
-            conn,
-            _phantom: PhantomData,
-        })
-    }
-
-    /// Serialize and send a typed payload.
-    pub async fn send(&mut self, payload: &C) -> Result<(), io::Error> {
-        let bytes = postcard::to_allocvec(payload)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        self.conn.send_bytes(&bytes).await
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketKind {
-    Broadcast,
+    /// Many senders → one receiver.
     Aggregate,
+    /// One sender → many receivers.
+    Broadcast,
+    /// One sender → one receiver.
     PointToPoint,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketRole {
+    /// This side starts the listener.
     Bind,
+    /// This side connects to the listener.
     Connect,
+}
+
+// ── Typed Handles ───────────────────────────────────────────────────────────
+
+/// A strongly-typed user-facing write handle.
+///
+/// Wraps `spsc::Sender<T>` and a `Waker` that notifies the network thread
+/// that new data is available. The SPSC channel stores the raw structs,
+/// meaning zero allocations on the hot path. Serialization is offloaded
+/// to the background network thread.
+pub struct SendSocket<T> {
+    pub(crate) channel: spsc::Sender<T>,
+    pub(crate) waker: Arc<Waker>,
+}
+
+impl<T> SendSocket<T> {
+    pub(crate) fn new(channel: spsc::Sender<T>, waker: Arc<Waker>) -> Self {
+        Self { channel, waker }
+    }
+
+    /// Enqueue `value` for sending.
+    ///
+    /// This operation is extremely dumb and Non-Blocking. If the user-side
+    /// SPSC ring-buffer is full, the packet is silently dropped to avoid
+    /// blocking the critical path. The network thread handles tracking
+    /// bottlenecks and reporting telemetry.
+    #[inline(always)]
+    pub fn send(&mut self, value: T) {
+        if self.channel.send(value).is_ok() {
+            // Best-effort wake — ignore transient OS errors.
+            let _ = self.waker.wake();
+        }
+    }
+}
+
+/// A strongly-typed user-facing read handle.
+///
+/// The network thread does the parsing and deserialization, and pushes
+/// native structs down this channel for the user to consume with zero logic.
+pub struct RecvSocket<T> {
+    pub(crate) channel: spsc::Receiver<T>,
+}
+
+impl<T> RecvSocket<T> {
+    pub(crate) fn new(channel: spsc::Receiver<T>) -> Self {
+        Self { channel }
+    }
+
+    /// Try to receive the next message without blocking.
+    ///
+    /// Returns `None` when the queue is empty.
+    #[inline(always)]
+    pub fn try_recv(&mut self) -> Option<T> {
+        self.channel.recv()
+    }
 }

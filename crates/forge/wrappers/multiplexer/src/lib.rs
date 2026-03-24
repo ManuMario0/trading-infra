@@ -7,25 +7,23 @@
 //! support while developing. Forge only generates a thin main.rs that
 //! wires the user module into this wrapper.
 
-pub mod manifest;
 pub mod port;
 
-use std::{str::FromStr, time::Duration};
+use std::path::PathBuf;
+use std::thread::{self, sleep};
+use std::time::Duration;
 
-use ipc::address::Address;
-use journal::{
-    entry::LogLevel,
-    event::{
-        JournalEvent,
-        service::{ServiceEventKind, ServiceLifetimeEvent},
-    },
-    journal::Journal,
-};
+use ipc::make_ipc;
+use journal::entry::LogLevel;
+use journal::event::JournalEvent;
+use journal::event::service::{ServiceEventKind, ServiceLifetimeEvent};
+use journal::journal::Journal;
+use service::envelope::Envelope;
+use service::manifest::Manifest;
 use service::{env, identity::Identity};
-use tokio::time::sleep;
+use trading_sdk::Allocation;
+use trading_sdk::model::ledger::LedgerUpdate;
 use trading_sdk::{Multiplexist, identity::ServiceId};
-
-use crate::manifest::make_manifest;
 
 /// Metadata about the user module, injected by Forge at build time.
 pub struct ModuleInfo {
@@ -39,14 +37,35 @@ pub struct ModuleInfo {
 /// This is the main entry point called by the Forge-generated binary.
 /// It takes an instance of a user-defined multiplexer (returned by `entry_point()`)
 /// and a [`ModuleInfo`] describing the module being wrapped.
-pub async fn run(
+pub fn run(
     mut _multiplexer: Box<dyn Multiplexist>,
     info: ModuleInfo,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Setup IPC
+    let (
+        runner,
+        blueprint,
+        handle,
+        market_data_socket,
+        ledger_update_socket,
+        execution_result_socket,
+    ) = make_ipc!(
+        ALLOCATION_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<Allocation>, addr="127.0.0.1:8001", transport=TCP,
+        LEDGER_UPDATE_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<LedgerUpdate>, addr="127.0.0.1:8002", transport=TCP,
+        ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, capacity=1024, ty=Envelope<Allocation>, addr="127.0.0.1:8003", transport=TCP,
+    );
+
+    let manifest = Manifest {
+        blueprint,
+        name: info.name.to_string(),
+        version: info.version.to_string(),
+        description: info.description.to_string(),
+        service_type: "multiplexer".to_string(),
+    };
+
     // Checks if the flag manifest is set
     let is_manifest_request = env::parse_or(env::MANIFEST_REQUEST, false);
     if is_manifest_request {
-        let manifest = make_manifest(info);
         println!("{}", serde_json::to_string(&manifest).unwrap());
         return Ok(());
     }
@@ -56,20 +75,22 @@ pub async fn run(
     let service_identity = Identity::new(info.name, info.version, service_id);
 
     // Setup the journal.
-    let logger_addr_str: String =
-        env::parse_or(env::IPC_LOGGER_ADDR, "tcp://127.0.0.1:5555".to_string());
-    let logger_addr = Address::from_str(&logger_addr_str).unwrap();
-    let mut journal = Journal::new(service_identity, logger_addr).await.unwrap();
+    let (journal, mut journal_runner) = Journal::init(
+        1024,
+        service_identity,
+        PathBuf::from(env::parse_or(env::WORKING_DIR, "/tmp".to_string())),
+        PathBuf::from(env::parse_or(env::LOGGING_DIR, "/tmp".to_string())),
+    );
+    let journal_handle = thread::spawn(move || {
+        journal_runner.run();
+    });
 
     let startup_service_event = ServiceLifetimeEvent {
         service_type: "multiplexer".to_string(),
         kind: ServiceEventKind::Startup,
     };
     let startup_event = JournalEvent::ServiceLifetimeEvent(startup_service_event);
-    journal
-        .log(vec![], LogLevel::Info, startup_event)
-        .await
-        .unwrap(); // crash if connections is already down
+    journal.log(vec![], LogLevel::Info, startup_event).unwrap(); // crash if connections is already down
 
     println!("Starting Multiplexer Wrapper...");
 
@@ -80,6 +101,6 @@ pub async fn run(
 
     // V0: Infinite sleep to keep the process alive for testing the forge spawn
     loop {
-        sleep(Duration::from_secs(60)).await;
+        sleep(Duration::from_secs(60));
     }
 }

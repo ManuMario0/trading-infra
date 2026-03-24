@@ -7,7 +7,7 @@ use journal::event::orchestrator::CommandEvent;
 
 use crate::app::App;
 
-pub async fn run_cli(app: &mut App) {
+pub fn run_cli(app: &mut App) {
     // Bootup main loop
     loop {
         println!("\n=== Orchestrator Control ===");
@@ -67,7 +67,7 @@ pub async fn run_cli(app: &mut App) {
                     service_path,
                     addr_map,
                 };
-                app.process_command(cmd).await;
+                app.process_command(cmd);
                 println!("-> Sent Command: Deploy");
             }
             "2" => {
@@ -79,7 +79,7 @@ pub async fn run_cli(app: &mut App) {
                 match id_input.trim().parse::<u32>() {
                     Ok(service_id) => {
                         let cmd = CommandEvent::Stop { service_id };
-                        app.process_command(cmd).await;
+                        app.process_command(cmd);
                         println!("-> Sent Command: Stop (ID: {})", service_id);
                     }
                     Err(_) => println!("-> Error: Invalid ID provided. Must be a number."),

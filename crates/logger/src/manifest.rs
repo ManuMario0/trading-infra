@@ -1,7 +1,5 @@
-use std::any::type_name;
-
-use journal::entry::JournalEntry;
-use service::manifest::{Blueprint, Manifest, PortDefinition};
+use ipc::blueprint::Blueprint;
+use service::manifest::Manifest;
 
 pub const LOG_PIPE: &str = "LOG_PIPE";
 
@@ -11,17 +9,7 @@ pub fn make_manifest() -> Manifest {
     let description = env!("CARGO_PKG_DESCRIPTION");
     let service_type = "logger";
 
-    let logger_input = PortDefinition::new(
-        LOG_PIPE.to_string(),
-        type_name::<JournalEntry>().to_owned(),
-        ipc::socket::SocketKind::Aggregate,
-        ipc::socket::SocketRole::Bind,
-    );
-
-    let blueprint = Blueprint {
-        inputs: vec![logger_input],
-        outputs: vec![],
-    };
+    let blueprint = Blueprint { ports: vec![] };
 
     Manifest {
         blueprint,
