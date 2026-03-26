@@ -33,3 +33,5 @@ pub(crate) mod backoff;
 pub(crate) mod dispatcher;
 pub(crate) mod engines;
 pub(crate) mod framing;
+
+pub use mio::{Poll, Registry, Waker};

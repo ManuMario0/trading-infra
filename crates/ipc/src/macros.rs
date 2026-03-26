@@ -6,7 +6,7 @@ macro_rules! make_ipc {
         ),* $(,)?
     ) => {{
         use std::sync::Arc;
-        use mio::{Poll, Waker};
+        use $crate::{Poll, Waker};
         use $crate::token::TokenRegistry;
         use $crate::runner::{IpcRunner, IpcHandle, SHUTDOWN_TOKEN};
         use $crate::factory::SocketFactory;

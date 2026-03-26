@@ -280,7 +280,6 @@ version = "0.1.0"
 dependencies = [
  "ipc",
  "journal",
- "mio",
  "rust_decimal",
  "rust_decimal_macros",
  "serde",
@@ -354,7 +353,6 @@ version = "0.1.0"
 dependencies = [
  "ipc",
  "journal",
- "mio",
  "serde_json",
  "service",
  "trading-sdk",
