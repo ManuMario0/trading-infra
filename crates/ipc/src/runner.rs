@@ -19,7 +19,7 @@ use mio::{Events, Poll, Token, Waker};
 use crate::dispatcher::EngineDispatcher;
 
 // Token reserved for the shutdown waker (see init.rs / macro)
-pub const SHUTDOWN_TOKEN: Token = Token(usize::MAX);
+pub const WAKER_TOKEN: Token = Token(usize::MAX);
 
 // ── IpcHandle ────────────────────────────────────────────────────────────────
 
@@ -84,13 +84,16 @@ impl<T: EngineDispatcher> IpcRunner<T> {
             let mut shutdown = false;
 
             for event in &self.events {
-                if event.token() == SHUTDOWN_TOKEN || SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
-                    shutdown = true;
-                    break;
+                if event.token() == WAKER_TOKEN {
+                    if SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
+                        shutdown = true;
+                        break;
+                    }
+                    self.engines.on_wake();
+                } else {
+                    // Zero cost static dispatch directly to the correct engine
+                    self.engines.on_event(event.token());
                 }
-
-                // Zero cost static dispatch directly to the correct engine
-                self.engines.on_event(event.token());
             }
 
             if shutdown {

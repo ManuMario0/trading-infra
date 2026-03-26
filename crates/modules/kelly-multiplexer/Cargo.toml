@@ -3,5 +3,8 @@ name = "kelly-multiplexer"
 version = "0.1.0"
 edition = "2024"
 
+[package.metadata.trading]
+type = "multiplexer"
+
 [dependencies]
 trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }

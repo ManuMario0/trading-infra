@@ -7,6 +7,10 @@
 //! specialization of the network engines, guaranteeing perfectly optimal memory
 //! layouts with zero dynamic dispatch or monolithic enum overhead.
 
+use std::sync::Arc;
+
+use mio::Waker;
+
 use crate::token::TokenRegistry;
 
 // ── Protocol / Transports ──────────────────────────────────────────────────
@@ -50,5 +54,6 @@ pub trait SocketFactory<Msg> {
         addr: &str,
         capacity: usize,
         registry: TokenRegistry,
+        waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle);
 }

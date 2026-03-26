@@ -4,11 +4,13 @@ use crate::token::{self, LocalIndex};
 
 pub trait NetworkEngine {
     fn on_event(&mut self, local_index: LocalIndex);
+    fn on_wake(&mut self);
     fn on_tick(&mut self);
 }
 
 pub trait EngineDispatcher {
     fn on_event(&mut self, token: Token);
+    fn on_wake(&mut self);
     fn on_tick(&mut self);
 }
 
@@ -28,6 +30,11 @@ macro_rules! impl_engine_dispatcher {
             #[inline(always)]
             fn on_tick(&mut self) {
                 $( self.$idx.on_tick(); )+
+            }
+
+            #[inline(always)]
+            fn on_wake(&mut self) {
+                $( self.$idx.on_wake(); )+
             }
         }
     }

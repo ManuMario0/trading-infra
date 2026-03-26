@@ -1,3 +1,4 @@
+use trading_sdk::Multiplexist;
 use trading_sdk::model::allocation::Allocation;
 use trading_sdk::model::ledger::LedgerUpdate;
 
@@ -9,6 +10,26 @@ pub struct KellyMultiplexer {
     // Current state of the account
     pub ledger: Option<LedgerUpdate>,
     // You might want to store a list of current target allocations
+}
+
+impl Multiplexist for KellyMultiplexer {
+    fn on_allocation(
+        &mut self,
+        context: trading_sdk::model::context::Context,
+        source_id: trading_sdk::identity::ServiceId,
+        batch: Allocation,
+    ) -> Allocation {
+        todo!()
+    }
+
+    fn on_ledger_update(
+        &mut self,
+        context: trading_sdk::model::context::Context,
+        source_id: trading_sdk::identity::ServiceId,
+        ledger_update: LedgerUpdate,
+    ) {
+        todo!()
+    }
 }
 
 impl KellyMultiplexer {
@@ -31,4 +52,8 @@ impl KellyMultiplexer {
     pub fn on_ledger_update(&mut self, update: LedgerUpdate) {
         self.ledger = Some(update);
     }
+}
+
+pub fn entry_point() -> Box<dyn Multiplexist> {
+    Box::new(KellyMultiplexer::new())
 }

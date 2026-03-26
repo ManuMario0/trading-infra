@@ -8,16 +8,16 @@ macro_rules! make_ipc {
         use std::sync::Arc;
         use $crate::{Poll, Waker};
         use $crate::token::TokenRegistry;
-        use $crate::runner::{IpcRunner, IpcHandle, SHUTDOWN_TOKEN};
+        use $crate::runner::{IpcRunner, IpcHandle, WAKER_TOKEN};
         use $crate::factory::SocketFactory;
         use $crate::blueprint::{Blueprint, PortDefinition};
         use $crate::socket::{SocketKind, SocketRole};
 
         let poll = Poll::new().expect("Failed to create Poll");
         let registry = Arc::new(poll.registry().try_clone().expect("Failed to clone registry"));
+        let waker = Arc::new(Waker::new(&registry, WAKER_TOKEN).expect("Failed to create waker"));
 
-        let shutdown_waker = Arc::new(Waker::new(&registry, SHUTDOWN_TOKEN).expect("Failed to create waker"));
-        let handle = IpcHandle::new(shutdown_waker.clone());
+        let handle = IpcHandle::new(waker.clone());
 
         // A temporary struct to flawlessly unzip the macro repetitions into
         // cleanly separated engine tuples and socket tuples without needing `paste!`
@@ -36,6 +36,7 @@ macro_rules! make_ipc {
                         $addr,
                         $cap,
                          TokenRegistry::new(_prefix_counter, registry.clone()),
+                        waker.clone(),
                     );
                     _prefix_counter += 1;
                     pair
@@ -43,7 +44,7 @@ macro_rules! make_ipc {
             ),*
         };
 
-        let runner = IpcRunner::new(poll, ( $( pairs.$name.0, )* ), shutdown_waker.clone());
+        let runner = IpcRunner::new(poll, ( $( pairs.$name.0, )* ), waker.clone());
 
         let blueprint = Blueprint {
             ports: vec![ $(

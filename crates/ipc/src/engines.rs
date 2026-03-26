@@ -125,6 +125,9 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
             }
         }
     }
+
+    #[inline(always)]
+    fn on_wake(&mut self) {} // do nothing, we are not listening to an SPSC channel
 }
 
 // ── Factory Implementation ──────────────────────────────────────────────────
@@ -138,6 +141,7 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg> for (TCP, Broadcast, Connect) {
         addr: &str,
         capacity: usize,
         registry: TokenRegistry,
+        _waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
         let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
         let port_info = PortInfo {
@@ -159,6 +163,10 @@ impl<Msg: DeserializeOwned> NetworkEngine for TcpBroadcastConnectEngine<Msg> {
 
     fn on_tick(&mut self) {
         self.on_tick();
+    }
+
+    fn on_wake(&mut self) {
+        self.on_wake();
     }
 }
 
@@ -187,10 +195,9 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
         addr: SocketAddr,
         capacity: usize,
         registry: TokenRegistry,
+        waker: Arc<Waker>,
     ) -> (Self, SendSocket<Msg>) {
         let (tx, rx) = spsc::new(capacity);
-
-        let waker = Arc::new(registry.register_waker(LocalIndex(0)).unwrap());
 
         let engine = Self {
             port_info,
@@ -231,29 +238,8 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     /// Handles readable events fired by Mio on this port's specific token.
     fn on_event(&mut self, local_index: LocalIndex) {
         if let Some(stream) = &mut self.stream {
+            // We don't deal with the waker as this is processed externally
             match local_index.0 {
-                0 => {
-                    while let Some(msg) = self.queue.recv() {
-                        // Expensive allocation here for now
-                        self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
-                        match self.writer.try_flush(stream) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                if e.kind() == io::ErrorKind::WouldBlock {
-                                    // We simply ignore and continue, should be recorded eventually for telemetry
-                                    break;
-                                } else {
-                                    // Unexpected structural error. Restart gracefully.
-                                    // Note that we drop packets here (the ones in flight in the writer).
-                                    self.stream = None;
-                                    self.writer = FrameWriter::new();
-                                    self.backoff.mark_failed();
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
                 1 => {
                     match self.writer.try_flush(stream) {
                         Ok(_) => {}
@@ -275,6 +261,33 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
             }
         }
     }
+
+    #[inline(always)]
+    /// Triggered when the waker is called
+    fn on_wake(&mut self) {
+        if let Some(stream) = &mut self.stream {
+            while let Some(msg) = self.queue.recv() {
+                // Expensive allocation here for now
+                self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
+                match self.writer.try_flush(stream) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            // We simply ignore and continue, should be recorded eventually for telemetry
+                            break;
+                        } else {
+                            // Unexpected structural error. Restart gracefully.
+                            // Note that we drop packets here (the ones in flight in the writer).
+                            self.stream = None;
+                            self.writer = FrameWriter::new();
+                            self.backoff.mark_failed();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ── Factory Implementation ──────────────────────────────────────────────────
@@ -288,6 +301,7 @@ impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Aggregate, Connect) {
         addr: &str,
         capacity: usize,
         registry: TokenRegistry,
+        waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
         let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
         let port_info = PortInfo {
@@ -298,7 +312,7 @@ impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Aggregate, Connect) {
             role: "Connect".to_string(),
             capacity,
         };
-        TcpAggregateConnectEngine::new(port_info, parsed_addr, capacity, registry)
+        TcpAggregateConnectEngine::new(port_info, parsed_addr, capacity, registry, waker)
     }
 }
 
@@ -310,13 +324,16 @@ impl<Msg: Serialize> NetworkEngine for TcpAggregateConnectEngine<Msg> {
     fn on_tick(&mut self) {
         self.on_tick();
     }
+
+    fn on_wake(&mut self) {
+        self.on_wake();
+    }
 }
 
 // ── (TCP + Broadcast + Bind) ──────────────────────────────────
 
 const MAX_CLIENTS: usize = 1024;
 const LISTENER_INDEX: usize = MAX_CLIENTS;
-const WAKER_INDEX: usize = MAX_CLIENTS + 1;
 
 /// The native background engine for `(TCP, Broadcast, Bind)`.
 ///
@@ -355,10 +372,9 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
         addr: SocketAddr,
         capacity: usize,
         registry: TokenRegistry,
+        waker: Arc<Waker>,
     ) -> (Self, SendSocket<Msg>) {
         let (tx, rx) = spsc::new(capacity);
-
-        let waker = Arc::new(registry.register_waker(LocalIndex(WAKER_INDEX)).unwrap());
 
         let engine = Self {
             port_info,
@@ -401,31 +417,6 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
     fn on_event(&mut self, local_index: LocalIndex) {
         if let Some(listener) = &mut self.listener {
             match local_index.0 {
-                WAKER_INDEX => {
-                    while let Some(msg) = self.queue.recv() {
-                        // Bonus optimization: serialize once for all clients!
-                        let serialized = postcard::to_allocvec(&msg).unwrap();
-                        for client_opt in self.clients.iter_mut() {
-                            let mut disconnect = false;
-                            if let Some(client) = client_opt {
-                                client.writer.enqueue(serialized.clone());
-                                match client.writer.try_flush(&mut client.stream) {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        if e.kind() == io::ErrorKind::WouldBlock {
-                                            // We simply ignore and continue, should be recorded eventually for telemetry
-                                        } else {
-                                            disconnect = true;
-                                        }
-                                    }
-                                }
-                            }
-                            if disconnect {
-                                *client_opt = None;
-                            }
-                        }
-                    }
-                }
                 LISTENER_INDEX => {
                     match listener.accept() {
                         Ok((mut stream, addr)) => {
@@ -479,6 +470,33 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
             }
         }
     }
+
+    #[inline(always)]
+    fn on_wake(&mut self) {
+        while let Some(msg) = self.queue.recv() {
+            // Bonus optimization: serialize once for all clients!
+            let serialized = postcard::to_allocvec(&msg).unwrap();
+            for client_opt in self.clients.iter_mut() {
+                let mut disconnect = false;
+                if let Some(client) = client_opt {
+                    client.writer.enqueue(serialized.clone());
+                    match client.writer.try_flush(&mut client.stream) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            if e.kind() == io::ErrorKind::WouldBlock {
+                                // We simply ignore and continue, should be recorded eventually for telemetry
+                            } else {
+                                disconnect = true;
+                            }
+                        }
+                    }
+                }
+                if disconnect {
+                    *client_opt = None;
+                }
+            }
+        }
+    }
 }
 
 // ── Factory Implementation ──────────────────────────────────────────────────
@@ -492,6 +510,7 @@ impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Broadcast, Bind) {
         addr: &str,
         capacity: usize,
         registry: TokenRegistry,
+        waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
         let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
         let port_info = PortInfo {
@@ -502,7 +521,7 @@ impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Broadcast, Bind) {
             role: "Bind".to_string(),
             capacity,
         };
-        TcpBroadcastBindEngine::new(port_info, parsed_addr, capacity, registry)
+        TcpBroadcastBindEngine::new(port_info, parsed_addr, capacity, registry, waker)
     }
 }
 
@@ -513,6 +532,10 @@ impl<Msg: Serialize> NetworkEngine for TcpBroadcastBindEngine<Msg> {
 
     fn on_tick(&mut self) {
         self.on_tick();
+    }
+
+    fn on_wake(&mut self) {
+        self.on_wake();
     }
 }
 
@@ -653,6 +676,8 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
             }
         }
     }
+
+    fn on_wake(&mut self) {}
 }
 
 // ── Factory Implementation ──────────────────────────────────────────────────
@@ -666,6 +691,7 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg> for (TCP, Aggregate, Bind) {
         addr: &str,
         capacity: usize,
         registry: TokenRegistry,
+        _waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
         let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP bind");
         let port_info = PortInfo {
@@ -687,5 +713,9 @@ impl<Msg: DeserializeOwned> NetworkEngine for TcpAggregateBindEngine<Msg> {
 
     fn on_tick(&mut self) {
         self.on_tick();
+    }
+
+    fn on_wake(&mut self) {
+        self.on_wake();
     }
 }

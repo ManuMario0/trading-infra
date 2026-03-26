@@ -56,8 +56,7 @@ pub fn scaffold(
         "\
 use {crate_name}::entry_point;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {{
+fn main() -> Result<(), Box<dyn std::error::Error>> {{
     {wrapper_crate_ident}::run(
         entry_point(),
         {wrapper_crate_ident}::ModuleInfo {{
@@ -65,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
             version: \"{version}\",
             description: \"{description}\",
         }},
-    ).await
+    )
 }}
 ",
         name = module.name,
@@ -85,7 +84,6 @@ edition = \"2024\"
 [workspace]
 
 [dependencies]
-tokio = {{ version = \"1.43.0\", features = [\"full\"] }}
 {wrapper_crate} = {{ path = \"{wrapper}\" }}
 {name} = {{ path = \"{target}\" }}
 ",
