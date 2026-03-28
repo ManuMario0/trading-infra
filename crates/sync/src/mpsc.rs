@@ -1,48 +1,60 @@
 //! Simple SPSC ring buffer
 
-use std::array;
+use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use crate::error::ChannelError;
 use crate::spsc;
 
-struct Mpsc<C, const MAX_PRODUCERS: usize> {
-    /// The spsc channels
-    producers: [(spsc::Sender<C>, spsc::Receiver<C>); MAX_PRODUCERS],
-
-    /// Atomic counter for the number of active producers
-    active_producers: AtomicUsize,
+/// Shared state for the MPSC channel, mainly used to store spare senders for cloning.
+struct MpscInner<C> {
+    spare_senders: Mutex<Vec<spsc::Sender<C>>>,
 }
 
-unsafe impl<C: Send, const MAX_PRODUCERS: usize> Send for Mpsc<C, MAX_PRODUCERS> {}
-unsafe impl<C: Send, const MAX_PRODUCERS: usize> Sync for Mpsc<C, MAX_PRODUCERS> {}
-
 pub struct Sender<C, const MAX_PRODUCERS: usize> {
-    channel: Arc<Mpsc<C, MAX_PRODUCERS>>,
-    producer_id: usize,
+    inner: spsc::Sender<C>,
+    shared: Arc<MpscInner<C>>,
 }
 
 pub struct Receiver<C, const MAX_PRODUCERS: usize> {
-    channel: Arc<Mpsc<C, MAX_PRODUCERS>>,
-    last_producer_id_checked: AtomicUsize,
+    receivers: [spsc::Receiver<C>; MAX_PRODUCERS],
+    // We keep a reference to the shared state to ensure it lives as long as the receiver
+    _shared: Arc<MpscInner<C>>,
+    last_producer_id_checked: Cell<usize>,
 }
 
-impl<C, const MAX_PRODUCERS: usize> Mpsc<C, MAX_PRODUCERS> {
-    fn new(capacity: usize) -> (Sender<C, MAX_PRODUCERS>, Receiver<C, MAX_PRODUCERS>) {
-        let producers = array::from_fn(|_| spsc::new(capacity));
-        let mpsc = Arc::new(Self {
-            producers,
-            active_producers: AtomicUsize::new(1),
+impl<C> MpscInner<C> {
+    fn new<const MAX_PRODUCERS: usize>(
+        capacity: usize,
+    ) -> (Sender<C, MAX_PRODUCERS>, Receiver<C, MAX_PRODUCERS>) {
+        let mut txs = Vec::with_capacity(MAX_PRODUCERS);
+        let mut rxs = Vec::with_capacity(MAX_PRODUCERS);
+
+        for _ in 0..MAX_PRODUCERS {
+            let (tx, rx) = spsc::new(capacity);
+            txs.push(tx);
+            rxs.push(rx);
+        }
+
+        // The first producer gets the first sender handle
+        let first_tx = txs.remove(0);
+
+        let shared = Arc::new(Self {
+            spare_senders: Mutex::new(txs),
         });
+
         (
             Sender {
-                channel: mpsc.clone(),
-                producer_id: 0,
+                inner: first_tx,
+                shared: shared.clone(),
             },
             Receiver {
-                channel: mpsc,
-                last_producer_id_checked: AtomicUsize::new(0),
+                receivers: rxs
+                    .try_into()
+                    .unwrap_or_else(|_| panic!("Failed to convert receivers")),
+                _shared: shared,
+                last_producer_id_checked: Cell::new(0),
             },
         )
     }
@@ -51,37 +63,30 @@ impl<C, const MAX_PRODUCERS: usize> Mpsc<C, MAX_PRODUCERS> {
 pub fn new<C, const MAX_PRODUCERS: usize>(
     capacity: usize,
 ) -> (Sender<C, MAX_PRODUCERS>, Receiver<C, MAX_PRODUCERS>) {
-    Mpsc::new(capacity)
+    MpscInner::new(capacity)
 }
 
 impl<C, const MAX_PRODUCERS: usize> Sender<C, MAX_PRODUCERS> {
     pub fn send(&self, value: C) -> Result<(), ChannelError> {
-        self.channel.producers[self.producer_id].0.send(value)
+        self.inner.send(value)
     }
 }
 
 impl<C, const MAX_PRODUCERS: usize> Receiver<C, MAX_PRODUCERS> {
     pub fn recv(&self) -> Option<C> {
-        let active_producers = self.channel.active_producers.load(Ordering::Relaxed);
-        let last_producer_id_checked = self.last_producer_id_checked.load(Ordering::Relaxed);
+        let last_producer_id_checked = self.last_producer_id_checked.get();
 
-        for producer_id in last_producer_id_checked..active_producers {
-            if let Some(value) = self.channel.producers[producer_id].1.recv() {
-                // Store `producer_id + 1` so the absolute next call starts checking the NEXT queue,
-                // guaranteeing true round-robin fairness without queue starvation.
-                if producer_id + 1 == active_producers {
-                    self.last_producer_id_checked.store(0, Ordering::Relaxed);
-                } else {
-                    self.last_producer_id_checked
-                        .store(producer_id + 1, Ordering::Relaxed);
-                }
+        for producer_id in last_producer_id_checked..MAX_PRODUCERS {
+            if let Some(value) = self.receivers[producer_id].recv() {
+                self.last_producer_id_checked
+                    .set((producer_id + 1) % MAX_PRODUCERS);
                 return Some(value);
             }
         }
         for producer_id in 0..last_producer_id_checked {
-            if let Some(value) = self.channel.producers[producer_id].1.recv() {
+            if let Some(value) = self.receivers[producer_id].recv() {
                 self.last_producer_id_checked
-                    .store(producer_id + 1, Ordering::Relaxed);
+                    .set((producer_id + 1) % MAX_PRODUCERS);
                 return Some(value);
             }
         }
@@ -91,19 +96,16 @@ impl<C, const MAX_PRODUCERS: usize> Receiver<C, MAX_PRODUCERS> {
 
 impl<C, const MAX_PRODUCERS: usize> Clone for Sender<C, MAX_PRODUCERS> {
     fn clone(&self) -> Self {
-        let producer_id = self
-            .channel
-            .active_producers
-            .fetch_add(1, Ordering::Relaxed);
-        if producer_id >= MAX_PRODUCERS {
+        let mut spares = self.shared.spare_senders.lock().unwrap();
+        if spares.is_empty() {
             panic!(
                 "Exceeded MAX_PRODUCERS completely in the MPSC channel! Increase your generic constant."
             );
         }
 
         Self {
-            channel: self.channel.clone(),
-            producer_id,
+            inner: spares.remove(0),
+            shared: self.shared.clone(),
         }
     }
 }

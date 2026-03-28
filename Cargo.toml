@@ -9,5 +9,6 @@ members = [
     "crates/modules/kelly-multiplexer",
     "crates/forge/wrappers/multiplexer",
     "crates/ledger", "crates/sync",
+    "crates/sync-lab",
 ]
 resolver = "2"

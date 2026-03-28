@@ -1,0 +1,10 @@
+[package]
+name = "sync-lab"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sync = { path = "../sync" }
+core_affinity = "0.8"
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
