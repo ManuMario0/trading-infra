@@ -60,7 +60,7 @@ fn main() {
         ServiceId::new(service_id),
     );
 
-    // Connect to logger
+    // Startup journal thread
     let working_dir = env::parse_or(env::WORKING_DIR, "/tmp".to_string());
     let log_dir = env::parse_or(env::LOGGING_DIR, "/tmp".to_string());
     let (journal, mut journal_runner) = Journal::init(
@@ -73,7 +73,7 @@ fn main() {
         journal_runner.run();
     });
 
-    // Send service started event
+    // Emit service started event
     let startup_lineage = journal
         .log(
             vec![],

@@ -24,6 +24,7 @@ pub struct App {
     pub journal: Journal,
     pub service_registry: ServiceRegistry,
     pub startup_id: LineageId,
+    pub logging_dir: PathBuf,
 
     _journal_thread: thread::JoinHandle<()>,
 }
@@ -63,7 +64,7 @@ impl App {
             1024,
             orchestrator_identity.clone(),
             PathBuf::from(working_dir.clone()),
-            logging_dir,
+            logging_dir.clone(),
         );
         let journal_thread = thread::spawn(move || {
             journal_runner.run();
@@ -79,7 +80,9 @@ impl App {
         );
         let startup_id = journal.log(vec![], LogLevel::Info, startup_event).unwrap();
 
-        let service_registry = ServiceRegistry::new();
+        let service_working_dir = PathBuf::from(working_dir.clone()).join("services");
+        std::fs::create_dir_all(&service_working_dir).unwrap_or_else(|_| ());
+        let service_registry = ServiceRegistry::new(service_working_dir);
 
         Self {
             identity: orchestrator_identity,
@@ -88,6 +91,7 @@ impl App {
             journal,
             service_registry,
             startup_id,
+            logging_dir,
             _journal_thread: journal_thread,
         }
     }
@@ -109,7 +113,8 @@ impl App {
                     &mut self.port_allocator,
                     &mut self.service_allocator,
                     service_path.clone(),
-                    None,
+                    self.service_registry.working_dir().clone(),
+                    self.logging_dir.clone(),
                     addr_map,
                     Context::new(),
                 );

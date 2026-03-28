@@ -21,7 +21,8 @@ impl ServiceInfo {
         port_allocator: &mut Allocator,
         service_allocator: &mut ServiceIdAllocator,
         path: PathBuf,
-        working_directory: Option<PathBuf>,
+        working_directory: PathBuf,
+        logging_directory: PathBuf,
         overrides: BTreeMap<String, Address>,
         mut context: Context,
     ) -> Result<Self, ServiceBootError> {
@@ -42,13 +43,16 @@ impl ServiceInfo {
         let service_id = service_allocator.next();
         let mut command = std::process::Command::new(&path);
         command.env(service::env::SERVICE_ID, service_id.get_inner().to_string());
-
-        if let Some(working_directory) = working_directory {
-            command.env(
-                service::env::WORKING_DIR,
-                working_directory.to_string_lossy().to_string(),
-            );
-        }
+        let working_directory = working_directory.join(service_id.get_inner().to_string());
+        std::fs::create_dir_all(&working_directory).unwrap_or_else(|_| ());
+        command.env(
+            service::env::WORKING_DIR,
+            working_directory.to_string_lossy().to_string(),
+        );
+        command.env(
+            service::env::LOGGING_DIR,
+            logging_directory.to_string_lossy().to_string(),
+        );
 
         // Inject ports
         for (i, port_def) in manifest.blueprint.all_ports().enumerate() {
