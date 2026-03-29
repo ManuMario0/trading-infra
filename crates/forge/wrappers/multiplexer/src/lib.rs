@@ -10,8 +10,7 @@
 pub mod port;
 
 use std::path::PathBuf;
-use std::thread::{self, sleep};
-use std::time::Duration;
+use std::thread;
 
 use ipc::make_ipc;
 use journal::entry::{LogLevel, ServiceKind, ThreadKind};
@@ -21,6 +20,7 @@ use service::event::{ServiceEventKind, ServiceLifetimeEvent};
 use service::manifest::Manifest;
 use service::{env, identity::Identity};
 use trading_sdk::Allocation;
+use trading_sdk::model::context::Context;
 use trading_sdk::model::ledger::LedgerUpdate;
 use trading_sdk::{Multiplexist, identity::ServiceId};
 
@@ -31,27 +31,51 @@ pub struct ModuleInfo {
     pub description: &'static str,
 }
 
+pub struct JournalWrapper<'a> {
+    journal: &'a Journal,
+}
+
+impl<'a> trading_sdk::journal::journal::Journal for JournalWrapper<'a> {
+    fn record(
+        &mut self,
+        parents: Vec<trading_sdk::journal::lineage::LineageId>,
+        event: trading_sdk::journal::event::ServiceEvent,
+    ) -> trading_sdk::journal::lineage::LineageId {
+        self.journal
+            .log(ThreadKind::Main, parents, LogLevel::Info, event)
+            .unwrap() // assume journal never fails
+    }
+}
+
 /// Runs the multiplexer wrapper lifecycle.
 ///
 /// This is the main entry point called by the Forge-generated binary.
 /// It takes an instance of a user-defined multiplexer (returned by `entry_point()`)
 /// and a [`ModuleInfo`] describing the module being wrapped.
 pub fn run(
-    mut _multiplexer: Box<dyn Multiplexist>,
+    mut multiplexer: Box<dyn Multiplexist>,
     info: ModuleInfo,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Acquire addresses
+    let allocation_input_addr =
+        env::parse_or("ALLOCATION_INPUT_ADDR", "127.0.0.1:8001".to_string());
+    let ledger_update_input_addr =
+        env::parse_or("LEDGER_UPDATE_INPUT_ADDR", "127.0.0.1:8002".to_string());
+    let allocation_output_addr =
+        env::parse_or("ALLOCATION_OUTPUT_ADDR", "127.0.0.1:8003".to_string());
+
     // Setup IPC
     let (
         runner,
         blueprint,
-        handle,
-        market_data_socket,
-        ledger_update_socket,
-        execution_result_socket,
+        _stop_handle,
+        mut market_data_socket,
+        mut ledger_update_socket,
+        mut execution_result_socket,
     ) = make_ipc!(
-        ALLOCATION_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<Allocation>, addr="127.0.0.1:8001", transport=TCP,
-        LEDGER_UPDATE_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<LedgerUpdate>, addr="127.0.0.1:8002", transport=TCP,
-        ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, capacity=1024, ty=Envelope<Allocation>, addr="127.0.0.1:8003", transport=TCP,
+        ALLOCATION_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_input_addr, transport=TCP,
+        LEDGER_UPDATE_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<LedgerUpdate>, addr=&ledger_update_input_addr, transport=TCP,
+        ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_output_addr, transport=TCP,
     );
 
     let manifest = Manifest {
@@ -81,13 +105,13 @@ pub fn run(
         PathBuf::from(env::parse_or(env::WORKING_DIR, "/tmp".to_string())),
         PathBuf::from(env::parse_or(env::LOGGING_DIR, "/tmp".to_string())),
     );
-    let journal_handle = thread::spawn(move || {
+    let _journal_handle = thread::spawn(move || {
         journal_runner.run();
     });
 
     // Start IPC
     let ipc_journal = journal.clone();
-    let ipc_handle = thread::spawn(move || {
+    let _ipc_handle = thread::spawn(move || {
         runner.run(ipc_journal).unwrap();
     });
 
@@ -95,19 +119,38 @@ pub fn run(
         service_type: "multiplexer".to_string(),
         kind: ServiceEventKind::Startup,
     };
-    let startup_lineage = journal
+    let _startup_lineage = journal
         .log(ThreadKind::Main, vec![], LogLevel::Info, startup_event)
         .unwrap(); // crash if initial log fails
 
     println!("Starting Multiplexer Wrapper...");
 
-    // TODO: Build and register manifest
-    // let _manifest = manifest::make_manifest();
-
-    // TODO: Setup IPC sockets and routing
-
-    // V0: Infinite sleep to keep the process alive for testing the forge spawn
     loop {
-        sleep(Duration::from_secs(60));
+        std::hint::spin_loop();
+
+        while let Some(allocation_msg) = market_data_socket.try_recv() {
+            let batch = allocation_msg.payload;
+            let source_id = allocation_msg.source;
+            let context = Context {
+                journal: &mut JournalWrapper { journal: &journal },
+            };
+            let return_batch = multiplexer
+                .as_mut()
+                .on_allocation(context, source_id, batch);
+            execution_result_socket.send(Envelope {
+                source: service_id,
+                payload: return_batch,
+            });
+        }
+        while let Some(ledger_update_msg) = ledger_update_socket.try_recv() {
+            let batch = ledger_update_msg.payload;
+            let source_id = ledger_update_msg.source;
+            let context = Context {
+                journal: &mut JournalWrapper { journal: &journal },
+            };
+            multiplexer
+                .as_mut()
+                .on_ledger_update(context, source_id, batch);
+        }
     }
 }
