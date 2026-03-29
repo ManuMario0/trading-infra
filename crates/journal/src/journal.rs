@@ -3,12 +3,11 @@
 use std::sync::Arc;
 
 use mio::Waker;
-use serde::Serialize;
 use sync::mpsc;
 use trading_sdk::identity::ServiceId;
 use trading_sdk::journal::lineage::LineageId;
 
-use crate::entry::{JournalEntry, LogLevel, MAX_EVENT_SIZE, ServiceKind, ThreadKind};
+use crate::entry::{JournalEntry, JournalEvent, LogLevel, ServiceKind, ThreadKind};
 use crate::lineage::LineageIdGenerator;
 
 pub(crate) const MAX_PRODUCERS: usize = 32;
@@ -47,16 +46,13 @@ impl Journal {
     }
 
     /// Log an event quietly on the background thread.
-    pub fn log<Event: Serialize>(
+    pub fn log<Event: JournalEvent>(
         &self,
         thread_kind: ThreadKind,
         parents: Vec<LineageId>,
         log_level: LogLevel,
         event: Event,
     ) -> Result<LineageId, std::io::Error> {
-        let mut event_bytes = [0u8; MAX_EVENT_SIZE];
-        let event = serde_json::to_string(&event).unwrap();
-        event_bytes[..event.len()].copy_from_slice(event.as_bytes());
         let lineage_id = self.lineage_id_generator.next();
         let journal_entry = JournalEntry::make_entry(
             self.service_id,
@@ -65,7 +61,7 @@ impl Journal {
             lineage_id,
             parents,
             log_level,
-            event_bytes,
+            Box::new(event),
         );
 
         self.mpsc_sender.send(journal_entry).map_err(|_| {

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::thread;
 
 use ipc::make_ipc;
-use journal::entry::JournalEntry;
 use journal::entry::LogLevel;
 use journal::entry::ServiceKind;
 use journal::entry::ThreadKind;
@@ -14,6 +13,8 @@ use service::event::ServiceEventKind;
 use service::event::ServiceLifetimeEvent;
 use service::identity::Identity;
 use service::manifest::Manifest;
+use trading_sdk::ExecutionResult;
+use trading_sdk::MarketDataBatch;
 use trading_sdk::identity::ServiceId;
 use trading_sdk::model::ledger::LedgerUpdate;
 
@@ -31,9 +32,9 @@ fn main() {
         ledger_update_socket,
         execution_result_socket,
     ) = make_ipc!(
-        MARKET_DATA_PIPE: kind=Broadcast, role=Connect, capacity=1024, ty=JournalEntry, addr="127.0.0.1:8001", transport=TCP,
+        MARKET_DATA_PIPE: kind=Broadcast, role=Connect, capacity=1024, ty=MarketDataBatch, addr="127.0.0.1:8001", transport=TCP,
         LEDGER_UPDATE_PIPE: kind=Broadcast, role=Bind, capacity=1024, ty=LedgerUpdate, addr="127.0.0.1:8002", transport=TCP,
-        EXECUTION_RESULT_PIPE: kind=Broadcast, role=Connect, capacity=1024, ty=JournalEntry, addr="127.0.0.1:8003", transport=TCP,
+        EXECUTION_RESULT_PIPE: kind=Broadcast, role=Connect, capacity=1024, ty=ExecutionResult, addr="127.0.0.1:8003", transport=TCP,
     );
 
     let manifest = Manifest {

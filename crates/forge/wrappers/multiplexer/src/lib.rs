@@ -14,7 +14,7 @@ use std::thread::{self, sleep};
 use std::time::Duration;
 
 use ipc::make_ipc;
-use journal::entry::{LogLevel, MAX_EVENT_SIZE, ServiceKind, ThreadKind};
+use journal::entry::{LogLevel, ServiceKind, ThreadKind};
 use journal::journal::Journal;
 use service::envelope::Envelope;
 use service::event::{ServiceEventKind, ServiceLifetimeEvent};
@@ -83,6 +83,12 @@ pub fn run(
     );
     let journal_handle = thread::spawn(move || {
         journal_runner.run();
+    });
+
+    // Start IPC
+    let ipc_journal = journal.clone();
+    let ipc_handle = thread::spawn(move || {
+        runner.run(ipc_journal).unwrap();
     });
 
     let startup_event = ServiceLifetimeEvent {

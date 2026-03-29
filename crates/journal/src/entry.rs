@@ -3,8 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use trading_sdk::{identity::ServiceId, journal::lineage::LineageId};
 
-pub const MAX_EVENT_SIZE: usize = 4096;
-
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum ServiceKind {
     Orchestrator,
@@ -21,8 +19,14 @@ pub enum ThreadKind {
     Other,
 }
 
+/// A trait for event payloads that can be serialized without knowing the concrete type.
+pub trait JournalEvent: erased_serde::Serialize + Send + 'static {}
+erased_serde::serialize_trait_object!(JournalEvent);
+
+impl<T: erased_serde::Serialize + Send + 'static> JournalEvent for T {}
+
 /// A structured event that can be recorded for audit/replay.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct JournalEntry {
     /// Service id
     pub service_id: ServiceId,
@@ -40,8 +44,10 @@ pub struct JournalEntry {
     /// Level of gravity of the entry
     pub log_level: LogLevel,
     /// The actual event payload
-    #[serde(with = "serde_bytes")]
-    pub event: [u8; MAX_EVENT_SIZE],
+    /// Note: This is skipped during deserialization because trait objects cannot be
+    /// instantiated without a registry of concrete types.
+    #[serde(skip_deserializing)]
+    pub event: Box<dyn JournalEvent>,
 }
 
 impl JournalEntry {
@@ -52,7 +58,7 @@ impl JournalEntry {
         lineage_id: LineageId,
         parents: Vec<LineageId>,
         log_level: LogLevel,
-        event: [u8; MAX_EVENT_SIZE],
+        event: Box<dyn JournalEvent>,
     ) -> Self {
         Self {
             service_id,

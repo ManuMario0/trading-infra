@@ -35,7 +35,7 @@ macro_rules! make_ipc {
                         stringify!($name),
                         $addr,
                         $cap,
-                         TokenRegistry::new(_prefix_counter, registry.clone()),
+                        TokenRegistry::new(_prefix_counter, registry.clone()),
                         waker.clone(),
                     );
                     _prefix_counter += 1;

@@ -53,6 +53,7 @@ pub struct TcpBroadcastConnectEngine<Msg> {
     stream: Option<TcpStream>,
     reader: FrameReader,
     backoff: BackoffTimer,
+    is_established: bool,
 
     _marker: PhantomData<Msg>,
 }
@@ -74,6 +75,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
             stream: None,
             reader: FrameReader::new(),
             backoff: BackoffTimer::default_network(),
+            is_established: false,
             _marker: PhantomData,
         };
 
@@ -93,23 +95,18 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
             );
             match TcpStream::connect(self.addr) {
                 Ok(mut stream) => {
-                    if self
+                    // We register for readable events to receive actual data and detect disconnection.
+                    let _ = self
                         .registry
-                        .register(&mut stream, LocalIndex(0), Interest::READABLE)
-                        .is_ok()
-                    {
-                        let _ = set_nodelay(&stream);
-                        self.stream = Some(stream);
-                        self.backoff.reset();
-                        log_event(
-                            journal,
-                            &self.port_info,
-                            LogLevel::Info,
-                            NetworkEventKind::Connected { peer: self.addr },
-                        );
-                    } else {
-                        self.backoff.mark_failed();
-                    }
+                        .register(&mut stream, LocalIndex(0), Interest::READABLE);
+
+                    // We register for writable events to identify when the connection is established.
+                    let _ = self
+                        .registry
+                        .register(&mut stream, LocalIndex(1), Interest::WRITABLE);
+
+                    let _ = set_nodelay(&stream);
+                    self.stream = Some(stream);
                 }
                 Err(_) => {
                     self.backoff.mark_failed();
@@ -147,47 +144,74 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, _local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
         if let Some(stream) = &mut self.stream {
-            match self.reader.try_read(stream) {
-                Ok(messages) => {
-                    for raw_msg in messages {
-                        // Deserialize the raw framing buffer directly to the typed Struct
-                        if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
-                            if self.queue.send(msg).is_err() {
+            match local_index.0 {
+                0 => match self.reader.try_read(stream) {
+                    Ok(messages) => {
+                        for raw_msg in messages {
+                            // Deserialize the raw framing buffer directly to the typed Struct
+                            if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
+                                if self.queue.send(msg).is_err() {
+                                    log_event(
+                                        journal,
+                                        &self.port_info,
+                                        LogLevel::Warn,
+                                        NetworkEventKind::ChannelFull,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(e)
+                        if e.kind() == io::ErrorKind::ConnectionReset
+                            || e.kind() == io::ErrorKind::Interrupted =>
+                    {
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Warn,
+                            NetworkEventKind::Disconnected { peer: self.addr },
+                        );
+                        self.stream = None;
+                        self.is_established = false;
+                        self.reader = FrameReader::new();
+                    }
+                    Err(_) => {
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Error,
+                            NetworkEventKind::Disconnected { peer: self.addr },
+                        );
+                        self.stream = None;
+                        self.is_established = false;
+                        self.reader = FrameReader::new();
+                        self.backoff.mark_failed();
+                    }
+                },
+                1 => {
+                    if !self.is_established {
+                        match stream.take_error() {
+                            Ok(None) => {
+                                self.is_established = true;
+                                self.backoff.reset();
                                 log_event(
                                     journal,
                                     &self.port_info,
-                                    LogLevel::Warn,
-                                    NetworkEventKind::ChannelFull,
+                                    LogLevel::Info,
+                                    NetworkEventKind::Connected { peer: self.addr },
                                 );
+                            }
+                            _ => {
+                                self.stream = None;
+                                self.backoff.mark_failed();
                             }
                         }
                     }
                 }
-                Err(e)
-                    if e.kind() == io::ErrorKind::ConnectionReset
-                        || e.kind() == io::ErrorKind::Interrupted =>
-                {
-                    log_event(
-                        journal,
-                        &self.port_info,
-                        LogLevel::Warn,
-                        NetworkEventKind::Disconnected { peer: self.addr },
-                    );
-                    self.stream = None;
-                    self.reader = FrameReader::new();
-                }
-                Err(_) => {
-                    log_event(
-                        journal,
-                        &self.port_info,
-                        LogLevel::Error,
-                        NetworkEventKind::Disconnected { peer: self.addr },
-                    );
-                    self.stream = None;
-                    self.reader = FrameReader::new();
-                    self.backoff.mark_failed();
+                _ => {
+                    unreachable!()
                 }
             }
         }
@@ -254,6 +278,7 @@ pub struct TcpAggregateConnectEngine<Msg> {
     writer: FrameWriter,
     backoff: BackoffTimer,
 
+    is_established: bool,
     _marker: PhantomData<Msg>,
 }
 
@@ -275,6 +300,7 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
             stream: None,
             writer: FrameWriter::new(),
             backoff: BackoffTimer::default_network(),
+            is_established: false,
             _marker: PhantomData,
         };
 
@@ -294,19 +320,17 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
             );
             match TcpStream::connect(self.addr) {
                 Ok(mut stream) => {
-                    // We register for writable events to be notified when the connection is closed.
+                    // We register for writable events to identify when the connection is established.
                     let _ = self
                         .registry
                         .register(&mut stream, LocalIndex(1), Interest::WRITABLE);
+                    // We also register for readable events to identify when the connection is closed.
+                    let _ = self
+                        .registry
+                        .register(&mut stream, LocalIndex(2), Interest::READABLE);
+
                     let _ = set_nodelay(&stream);
                     self.stream = Some(stream);
-                    self.backoff.reset();
-                    log_event(
-                        journal,
-                        &self.port_info,
-                        LogLevel::Info,
-                        NetworkEventKind::Connected { peer: self.addr },
-                    );
                 }
                 Err(_) => {
                     // Typical connection refused. Apply backoff.
@@ -330,11 +354,51 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
         if let Some(stream) = &mut self.stream {
             match local_index.0 {
-                1 => match self.writer.try_flush(stream) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::WouldBlock {
-                        } else {
+                1 => {
+                    if !self.is_established {
+                        match stream.take_error() {
+                            Ok(None) => {
+                                self.is_established = true;
+                                self.backoff.reset();
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Info,
+                                    NetworkEventKind::Connected { peer: self.addr },
+                                );
+                            }
+                            _ => {
+                                self.stream = None;
+                                self.backoff.mark_failed();
+                                return;
+                            }
+                        }
+                    }
+
+                    match self.writer.try_flush(stream) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            if e.kind() == io::ErrorKind::WouldBlock {
+                            } else {
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Error,
+                                    NetworkEventKind::Disconnected { peer: self.addr },
+                                );
+                                self.stream = None;
+                                self.is_established = false;
+                                self.writer = FrameWriter::new();
+                                self.backoff.mark_failed();
+                            }
+                        }
+                    }
+                }
+                2 => {
+                    let mut buf = [0u8; 1];
+                    use std::io::Read;
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => {
                             log_event(
                                 journal,
                                 &self.port_info,
@@ -342,11 +406,13 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
                                 NetworkEventKind::Disconnected { peer: self.addr },
                             );
                             self.stream = None;
+                            self.is_established = false;
                             self.writer = FrameWriter::new();
                             self.backoff.mark_failed();
                         }
+                        _ => {}
                     }
-                },
+                }
                 _ => {
                     unreachable!();
                 }
@@ -426,7 +492,7 @@ impl<Msg: Serialize> NetworkEngine for TcpAggregateConnectEngine<Msg> {
 
 // ── (TCP + Broadcast + Bind) ──────────────────────────────────
 
-const MAX_CLIENTS: usize = 1024;
+const MAX_CLIENTS: usize = 32;
 const LISTENER_INDEX: usize = MAX_CLIENTS;
 
 /// The native background engine for `(TCP, Broadcast, Bind)`.

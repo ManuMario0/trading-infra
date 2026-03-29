@@ -41,9 +41,9 @@ impl JournalRunner {
             for _ in self.events.iter() {
                 while let Some(event) = self.mpsc_recv.recv() {
                     // Purge the queue
-                    self.writer
-                        .write(serde_json::to_string(&event).unwrap().as_bytes())
-                        .unwrap();
+                    let mut json = serde_json::to_string(&event).unwrap();
+                    json.push('\n');
+                    self.writer.write(json.as_bytes()).unwrap();
                 }
             }
         }
