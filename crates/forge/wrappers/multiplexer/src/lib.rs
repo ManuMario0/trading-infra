@@ -14,11 +14,10 @@ use std::thread::{self, sleep};
 use std::time::Duration;
 
 use ipc::make_ipc;
-use journal::entry::LogLevel;
-use journal::event::JournalEvent;
-use journal::event::service::{ServiceEventKind, ServiceLifetimeEvent};
+use journal::entry::{LogLevel, MAX_EVENT_SIZE, ServiceKind, ThreadKind};
 use journal::journal::Journal;
 use service::envelope::Envelope;
+use service::event::{ServiceEventKind, ServiceLifetimeEvent};
 use service::manifest::Manifest;
 use service::{env, identity::Identity};
 use trading_sdk::Allocation;
@@ -77,7 +76,8 @@ pub fn run(
     // Setup the journal.
     let (journal, mut journal_runner) = Journal::init(
         1024,
-        service_identity,
+        service_identity.identifier,
+        ServiceKind::Multiplexer,
         PathBuf::from(env::parse_or(env::WORKING_DIR, "/tmp".to_string())),
         PathBuf::from(env::parse_or(env::LOGGING_DIR, "/tmp".to_string())),
     );
@@ -85,12 +85,13 @@ pub fn run(
         journal_runner.run();
     });
 
-    let startup_service_event = ServiceLifetimeEvent {
+    let startup_event = ServiceLifetimeEvent {
         service_type: "multiplexer".to_string(),
         kind: ServiceEventKind::Startup,
     };
-    let startup_event = JournalEvent::ServiceLifetimeEvent(startup_service_event);
-    journal.log(vec![], LogLevel::Info, startup_event).unwrap(); // crash if connections is already down
+    let startup_lineage = journal
+        .log(ThreadKind::Main, vec![], LogLevel::Info, startup_event)
+        .unwrap(); // crash if initial log fails
 
     println!("Starting Multiplexer Wrapper...");
 

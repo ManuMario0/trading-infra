@@ -7,12 +7,10 @@ use std::time::{Duration, Instant};
 
 use ipc::address::Address;
 use ipc::socket::SocketRole;
-use journal::event::context::Context;
-use journal::event::orchestrator::ServiceBootError;
-use journal::event::runtime::RuntimeErrorKind;
 use service::manifest::PortDefinition;
 
 use crate::port::allocator::Allocator;
+use crate::service::error::{Context, RuntimeErrorKind, ServiceBootError};
 use crate::service::info::ServiceInfo;
 use crate::service_id::ServiceIdAllocator;
 

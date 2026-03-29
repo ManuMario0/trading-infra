@@ -3,9 +3,8 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
-use journal::event::orchestrator::CommandEvent;
-
 use crate::app::App;
+use crate::event::CommandEvent;
 
 pub fn run_cli(app: &mut App) {
     // Bootup main loop

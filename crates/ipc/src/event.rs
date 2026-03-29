@@ -4,13 +4,14 @@
 //! can be dynamically dispatched to receive system telemetry optimally.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
 
 /// Fixed metadata holding the static network configuration for a specific port.
 ///
 /// Kept purely decoupled from dynamic event flow. The Engine holds onto an
 /// `Arc` of this to avoid string allocations when firing transient events.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortInfo {
     pub port_name: String,
     pub addr: String,
@@ -21,13 +22,13 @@ pub struct PortInfo {
 }
 
 /// A structured event emitted natively by the IPC network thread.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NetworkEvent {
     pub kind: NetworkEventKind,
-    pub port_info: Arc<PortInfo>,
+    pub port_info: PortInfo,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum NetworkEventKind {
     /// A remote peer successfully connected.
     Connected {
@@ -45,26 +46,21 @@ pub enum NetworkEventKind {
     Reconnected {
         peer: SocketAddr,
     },
-    /// The backoff timer mathematically exceeded its maximum allowed duration.
+    /// The backoff timer exceeded its maximum allowed duration.
+    ///
+    /// We still wait for try to reconnect, but trigger timeout event anyways.
     Timeout,
 
     // Telemetry / Ring-buffer pressure
     ChannelCapacity50,
     ChannelCapacity75,
-    /// The user-side inbound SPSC was full; a message was dropped.
-    InboundChannelFull {
-        dropped_count: u64,
-    },
-    /// The user-side outbound SPSC was full; a send was dropped.
-    OutboundChannelFull {
-        dropped_count: u64,
-    },
+    ChannelFull,
 
     /// OS / System-level operational error.
     Error(NetworkError),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum NetworkError {
     SystemError { os_error_code: Option<i32> },
     FramingError { description: String },

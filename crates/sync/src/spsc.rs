@@ -89,17 +89,10 @@ pub fn new<C>(capacity: usize) -> (Sender<C>, Receiver<C>) {
 }
 
 impl<C> Sender<C> {
+    #[inline(always)]
     pub fn send(&self, value: C) -> Result<(), ChannelError> {
-        let head = self.local_head.get();
-        let best_known_tail = self.best_known_tail.get();
-
-        let tail = if head - best_known_tail >= self.channel.capacity {
-            let tail = self.channel.tail.load(Ordering::Acquire);
-            self.best_known_tail.set(tail);
-            tail
-        } else {
-            best_known_tail
-        };
+        let head = self.head();
+        let tail = self.update_tail();
 
         if head - tail == self.channel.capacity {
             return Err(ChannelError::FullBuffer {
@@ -117,20 +110,64 @@ impl<C> Sender<C> {
         self.channel.head.store(head + 1, Ordering::Release);
         Ok(())
     }
+
+    /// Returns the number of available slots in the buffer.
+    ///
+    /// This function forces a L1 cache line synchronisation with the
+    /// producer, so it should be used sparingly.
+    #[inline(always)]
+    pub fn available(&self) -> u64 {
+        let head = self.head();
+        let tail = self.sync_tail(); // To get real available space
+
+        self.channel.capacity - (head - tail)
+    }
+
+    /// Returns the capacity of the buffer.
+    #[inline(always)]
+    pub fn capacity(&self) -> u64 {
+        self.channel.capacity
+    }
+
+    // Local implementation
+
+    #[inline(always)]
+    fn head(&self) -> u64 {
+        self.local_head.get()
+    }
+
+    #[inline(always)]
+    fn best_known_tail(&self) -> u64 {
+        self.best_known_tail.get()
+    }
+
+    /// Updates the tail if needed.
+    #[inline(always)]
+    fn update_tail(&self) -> u64 {
+        let head = self.head();
+        let best_known_tail = self.best_known_tail();
+
+        if head - best_known_tail >= self.channel.capacity {
+            self.sync_tail()
+        } else {
+            best_known_tail
+        }
+    }
+
+    /// Sync with the latest known tail.
+    #[inline(always)]
+    fn sync_tail(&self) -> u64 {
+        let tail = self.channel.tail.load(Ordering::Acquire);
+        self.best_known_tail.set(tail);
+        tail
+    }
 }
 
 impl<C> Receiver<C> {
+    #[inline(always)]
     pub fn recv(&self) -> Option<C> {
         let tail = self.local_tail.get();
-        let best_known_head = self.best_known_head.get();
-
-        let head = if best_known_head > tail {
-            best_known_head
-        } else {
-            let head = self.channel.head.load(Ordering::Acquire);
-            self.best_known_head.set(head);
-            head
-        };
+        let head = self.update_head();
 
         if head - tail == 0 {
             // Queue is empty. Before returning, ensure the producer sees
@@ -157,6 +194,49 @@ impl<C> Receiver<C> {
         }
 
         Some(value)
+    }
+
+    /// Returns the number of available slots in the buffer.
+    ///
+    /// This function forces a L1 cache line synchronisation with the
+    /// consumer, so it should be used sparingly.
+    #[inline(always)]
+    pub fn available(&self) -> u64 {
+        let head = self.update_head();
+        let tail = self.tail();
+
+        self.channel.capacity - (head - tail)
+    }
+
+    // Local implementation
+
+    #[inline(always)]
+    fn best_known_head(&self) -> u64 {
+        self.best_known_head.get()
+    }
+
+    #[inline(always)]
+    fn tail(&self) -> u64 {
+        self.local_tail.get()
+    }
+
+    #[inline(always)]
+    fn update_head(&self) -> u64 {
+        let tail = self.tail();
+        let best_known_head = self.best_known_head();
+
+        if best_known_head > tail {
+            best_known_head
+        } else {
+            self.sync_head()
+        }
+    }
+
+    #[inline(always)]
+    fn sync_head(&self) -> u64 {
+        let head = self.channel.head.load(Ordering::Acquire);
+        self.best_known_head.set(head);
+        head
     }
 }
 

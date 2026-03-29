@@ -7,8 +7,7 @@ edition = "2024"
 serde = "1.0.228"
 serde_json = "1.0.149"
 trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }
-service = { path = "../service" }
-ipc = { path = "../ipc" }
 sync = { path = "../sync" }
 mio = { version = "1.1.1", features = ["os-poll"] }
 memmap2 = "0.9.10"
+serde_bytes = "0.11.19"

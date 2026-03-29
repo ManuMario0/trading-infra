@@ -1,40 +1,41 @@
+use journal::journal::Journal;
 use mio::Token;
 
 use crate::token::{self, LocalIndex};
 
 pub trait NetworkEngine {
-    fn on_event(&mut self, local_index: LocalIndex);
-    fn on_wake(&mut self);
-    fn on_tick(&mut self);
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal);
+    fn on_wake(&mut self, journal: &Journal);
+    fn on_tick(&mut self, journal: &Journal);
 }
 
 pub trait EngineDispatcher {
-    fn on_event(&mut self, token: Token);
-    fn on_wake(&mut self);
-    fn on_tick(&mut self);
+    fn on_event(&mut self, token: Token, journal: &Journal);
+    fn on_wake(&mut self, journal: &Journal);
+    fn on_tick(&mut self, journal: &Journal);
 }
 
 macro_rules! impl_engine_dispatcher {
     ( $($idx:tt => $name:ident),+ ) => {
         impl<$($name: NetworkEngine),+> EngineDispatcher for ($($name,)+) {
             #[inline(always)]
-            fn on_event(&mut self, token: Token) {
+            fn on_event(&mut self, token: Token, journal: &Journal) {
                 let prefix = token::prefix(token);
                 let local_index = token::local_index(token);
                 match prefix {
-                    $( $idx => self.$idx.on_event(local_index), )+
+                    $( $idx => self.$idx.on_event(local_index, journal), )+
                     _ => unreachable!("Invalid token prefix"),
                 }
             }
 
             #[inline(always)]
-            fn on_tick(&mut self) {
-                $( self.$idx.on_tick(); )+
+            fn on_tick(&mut self, journal: &Journal) {
+                $( self.$idx.on_tick(journal); )+
             }
 
             #[inline(always)]
-            fn on_wake(&mut self) {
-                $( self.$idx.on_wake(); )+
+            fn on_wake(&mut self, journal: &Journal) {
+                $( self.$idx.on_wake(journal); )+
             }
         }
     }

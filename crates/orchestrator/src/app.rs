@@ -3,16 +3,15 @@ use std::thread;
 
 use trading_sdk::journal::lineage::LineageId;
 
-use journal::entry::LogLevel;
-use journal::event::JournalEvent;
-use journal::event::context::Context;
-use journal::event::orchestrator::{CommandEvent, OrchestratorEvent};
+use journal::entry::{LogLevel, ServiceKind, ThreadKind};
 use journal::journal::Journal;
 use service::env::parse_or;
 use service::identity::Identity;
 use service::make_identity;
 
+use crate::event::{CommandEvent, LifecycleEvent, OrchestratorEvent};
 use crate::port::allocator::Allocator;
+use crate::service::error::Context;
 use crate::service::info::ServiceInfo;
 use crate::service::registry::ServiceRegistry;
 use crate::service_id::ServiceIdAllocator;
@@ -62,7 +61,8 @@ impl App {
 
         let (journal, mut journal_runner) = Journal::init(
             1024,
-            orchestrator_identity.clone(),
+            orchestrator_identity.identifier,
+            ServiceKind::Orchestrator,
             PathBuf::from(working_dir.clone()),
             logging_dir.clone(),
         );
@@ -71,14 +71,12 @@ impl App {
         });
 
         // Record Lifecycle Events
-        let startup_event = JournalEvent::OrchestratorEvent(
-            journal::event::orchestrator::OrchestratorEvent::Lifecycle(
-                journal::event::orchestrator::LifecycleEvent::Startup {
-                    working_dir: working_dir.clone(),
-                },
-            ),
-        );
-        let startup_id = journal.log(vec![], LogLevel::Info, startup_event).unwrap();
+        let startup_event = OrchestratorEvent::Lifecycle(LifecycleEvent::Startup {
+            working_dir: working_dir.clone(),
+        });
+        let startup_id = journal
+            .log(ThreadKind::Main, vec![], LogLevel::Info, startup_event)
+            .unwrap();
 
         let service_working_dir = PathBuf::from(working_dir.clone()).join("services");
         std::fs::create_dir_all(&service_working_dir).unwrap_or_else(|_| ());
@@ -97,10 +95,15 @@ impl App {
     }
 
     pub fn process_command(&mut self, cmd: CommandEvent) {
-        let event = JournalEvent::OrchestratorEvent(OrchestratorEvent::Command(cmd.clone()));
+        let event = OrchestratorEvent::Command(cmd.clone());
         let cmd_lineage_id = self
             .journal
-            .log(vec![self.startup_id], LogLevel::Info, event)
+            .log(
+                ThreadKind::Main,
+                vec![self.startup_id],
+                LogLevel::Info,
+                event,
+            )
             .unwrap();
 
         match cmd {
@@ -120,26 +123,33 @@ impl App {
                 );
                 match service_info {
                     Ok(service_info) => {
-                        let event = JournalEvent::OrchestratorEvent(OrchestratorEvent::Lifecycle(
-                            journal::event::orchestrator::LifecycleEvent::ServiceSpawned {
-                                path: service_path,
-                                service_id: service_info.identifier,
-                                service_manifest: service_info.manifest.clone(),
-                            },
-                        ));
+                        let event = OrchestratorEvent::Lifecycle(LifecycleEvent::ServiceSpawned {
+                            path: service_path,
+                            service_id: service_info.identifier,
+                            service_manifest: service_info.manifest.clone(),
+                        });
                         self.service_registry.insert(service_info);
                         self.journal
-                            .log(vec![cmd_lineage_id], LogLevel::Info, event)
+                            .log(
+                                ThreadKind::Main,
+                                vec![cmd_lineage_id],
+                                LogLevel::Info,
+                                event,
+                            )
                             .unwrap();
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to spawn service: {:?}", e);
                         // Log structured error to journal
-                        let event = JournalEvent::OrchestratorEvent(OrchestratorEvent::Lifecycle(
-                            journal::event::orchestrator::LifecycleEvent::ServiceSpawnFailed(e),
-                        ));
+                        let event =
+                            OrchestratorEvent::Lifecycle(LifecycleEvent::ServiceSpawnFailed(e));
                         self.journal
-                            .log(vec![cmd_lineage_id], LogLevel::Error, event)
+                            .log(
+                                ThreadKind::Main,
+                                vec![cmd_lineage_id],
+                                LogLevel::Error,
+                                event,
+                            )
                             .unwrap();
                         eprintln!("{}", error_msg);
                     }

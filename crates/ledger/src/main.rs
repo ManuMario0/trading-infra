@@ -4,12 +4,14 @@ use std::thread;
 use ipc::make_ipc;
 use journal::entry::JournalEntry;
 use journal::entry::LogLevel;
-use journal::event::JournalEvent;
-use journal::event::service::{ServiceEventKind, ServiceLifetimeEvent};
+use journal::entry::ServiceKind;
+use journal::entry::ThreadKind;
 use journal::journal::Journal;
 use ledger::core::ledger::Ledger;
 use ledger::model::account::AccountName;
 use service::env;
+use service::event::ServiceEventKind;
+use service::event::ServiceLifetimeEvent;
 use service::identity::Identity;
 use service::manifest::Manifest;
 use trading_sdk::identity::ServiceId;
@@ -48,10 +50,6 @@ fn main() {
         return;
     }
 
-    let ipc_handle = thread::spawn(move || {
-        runner.run().unwrap();
-    });
-
     // Make identity
     let service_id = env::parse_or(env::SERVICE_ID, 0);
     let identity = Identity::new(
@@ -65,7 +63,8 @@ fn main() {
     let log_dir = env::parse_or(env::LOGGING_DIR, "/tmp".to_string());
     let (journal, mut journal_runner) = Journal::init(
         1024,
-        identity,
+        identity.identifier,
+        ServiceKind::Ledger,
         PathBuf::from(working_dir),
         PathBuf::from(log_dir),
     );
@@ -73,16 +72,18 @@ fn main() {
         journal_runner.run();
     });
 
+    let ipc_journal = journal.clone();
+    let ipc_handle = thread::spawn(move || {
+        runner.run(ipc_journal).unwrap();
+    });
+
     // Emit service started event
+    let startup_event = ServiceLifetimeEvent {
+        service_type: manifest.service_type,
+        kind: ServiceEventKind::Startup,
+    };
     let startup_lineage = journal
-        .log(
-            vec![],
-            LogLevel::Info,
-            JournalEvent::ServiceLifetimeEvent(ServiceLifetimeEvent {
-                service_type: manifest.service_type.clone(),
-                kind: ServiceEventKind::Startup,
-            }),
-        )
+        .log(ThreadKind::Main, vec![], LogLevel::Info, startup_event)
         .unwrap(); // crash if initial log fails
 
     println!("Starting {} v{}...", manifest.name, manifest.version);

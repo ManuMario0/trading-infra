@@ -5,6 +5,8 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use journal::entry::{LogLevel, ThreadKind};
+use journal::journal::Journal;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Interest, Waker};
 use serde::Serialize;
@@ -13,7 +15,7 @@ use sync::spsc;
 
 use crate::backoff::BackoffTimer;
 use crate::dispatcher::NetworkEngine;
-use crate::event::PortInfo;
+use crate::event::{NetworkEvent, NetworkEventKind, PortInfo};
 use crate::factory::{Aggregate, Bind, Broadcast, Connect, SocketFactory, TCP};
 use crate::framing::{FrameReader, FrameWriter};
 use crate::socket::{RecvSocket, SendSocket};
@@ -25,6 +27,16 @@ use crate::token::{LocalIndex, TokenRegistry};
 /// latency for small, frequent messages.
 pub(crate) fn set_nodelay(stream: &TcpStream) -> io::Result<()> {
     stream.set_nodelay(true)
+}
+
+/// Helper to fire a network event to the journal with minimal boilerplate.
+#[inline(always)]
+fn log_event(journal: &Journal, port_info: &PortInfo, level: LogLevel, kind: NetworkEventKind) {
+    let event = NetworkEvent {
+        port_info: port_info.clone(),
+        kind,
+    };
+    let _ = journal.log(ThreadKind::Network, vec![], level, event);
 }
 
 // ── (TCP + Broadcast + Connect) ──────────────────────────────────
@@ -69,11 +81,18 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     }
 
     /// Tries to establish (or re-establish) the connection on a regular interval.
-    fn on_tick(&mut self) {
+    fn on_tick(&mut self, journal: &Journal) {
         if self.stream.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Info,
+                NetworkEventKind::Reconnecting {
+                    attempt: self.backoff.attempt(),
+                },
+            );
             match TcpStream::connect(self.addr) {
                 Ok(mut stream) => {
-                    // Try registering with Mio
                     if self
                         .registry
                         .register(&mut stream, LocalIndex(0), Interest::READABLE)
@@ -82,29 +101,67 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
                         let _ = set_nodelay(&stream);
                         self.stream = Some(stream);
                         self.backoff.reset();
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Connected { peer: self.addr },
+                        );
                     } else {
                         self.backoff.mark_failed();
                     }
                 }
                 Err(_) => {
-                    // Typical connection refused. Apply backoff.
                     self.backoff.mark_failed();
                 }
             }
         }
+
+        // Channel pressure telemetry
+        if self.queue.available() * 4 < self.queue.capacity() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Warn,
+                NetworkEventKind::ChannelCapacity75,
+            );
+        }
+        if self.queue.available() * 2 < self.queue.capacity() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Warn,
+                NetworkEventKind::ChannelCapacity50,
+            );
+        }
+
+        // Timeout detection
+        if self.backoff.is_maxed() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Error,
+                NetworkEventKind::Timeout,
+            );
+        }
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, _local_index: LocalIndex) {
+    fn on_event(&mut self, _local_index: LocalIndex, journal: &Journal) {
         if let Some(stream) = &mut self.stream {
             match self.reader.try_read(stream) {
                 Ok(messages) => {
                     for raw_msg in messages {
                         // Deserialize the raw framing buffer directly to the typed Struct
                         if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
-                            // Non-blocking push. If the strategy algorithm is too slow to read
-                            // them, we just cleanly drop market data packets.
-                            let _ = self.queue.send(msg);
+                            if self.queue.send(msg).is_err() {
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Warn,
+                                    NetworkEventKind::ChannelFull,
+                                );
+                            }
                         }
                     }
                 }
@@ -112,12 +169,22 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
                     if e.kind() == io::ErrorKind::ConnectionReset
                         || e.kind() == io::ErrorKind::Interrupted =>
                 {
-                    // Connection dropped! Flush the reader buffer and delete the stream.
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Warn,
+                        NetworkEventKind::Disconnected { peer: self.addr },
+                    );
                     self.stream = None;
                     self.reader = FrameReader::new();
                 }
                 Err(_) => {
-                    // Unexpected structural error. Restart gracefully.
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Error,
+                        NetworkEventKind::Disconnected { peer: self.addr },
+                    );
                     self.stream = None;
                     self.reader = FrameReader::new();
                     self.backoff.mark_failed();
@@ -127,7 +194,9 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     }
 
     #[inline(always)]
-    fn on_wake(&mut self) {} // do nothing, we are not listening to an SPSC channel
+    fn on_wake(&mut self, _journal: &Journal) {
+        // do nothing, we are not listening to an SPSC channel
+    }
 }
 
 // ── Factory Implementation ──────────────────────────────────────────────────
@@ -157,16 +226,16 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg> for (TCP, Broadcast, Connect) {
 }
 
 impl<Msg: DeserializeOwned> NetworkEngine for TcpBroadcastConnectEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex) {
-        self.on_event(local_index);
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self) {
-        self.on_tick();
+    fn on_tick(&mut self, journal: &Journal) {
+        self.on_tick(journal);
     }
 
-    fn on_wake(&mut self) {
-        self.on_wake();
+    fn on_wake(&mut self, journal: &Journal) {
+        self.on_wake(journal);
     }
 }
 
@@ -179,7 +248,6 @@ pub struct TcpAggregateConnectEngine<Msg> {
 
     addr: SocketAddr,
     queue: spsc::Receiver<Msg>,
-    waker: Arc<Waker>,
     registry: TokenRegistry,
 
     stream: Option<TcpStream>,
@@ -203,7 +271,6 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
             port_info,
             addr,
             queue: rx,
-            waker: waker.clone(),
             registry,
             stream: None,
             writer: FrameWriter::new(),
@@ -215,8 +282,16 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     }
 
     /// Tries to establish (or re-establish) the connection on a regular interval.
-    fn on_tick(&mut self) {
+    fn on_tick(&mut self, journal: &Journal) {
         if self.stream.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Info,
+                NetworkEventKind::Reconnecting {
+                    attempt: self.backoff.attempt(),
+                },
+            );
             match TcpStream::connect(self.addr) {
                 Ok(mut stream) => {
                     // We register for writable events to be notified when the connection is closed.
@@ -226,6 +301,12 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
                     let _ = set_nodelay(&stream);
                     self.stream = Some(stream);
                     self.backoff.reset();
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Info,
+                        NetworkEventKind::Connected { peer: self.addr },
+                    );
                 }
                 Err(_) => {
                     // Typical connection refused. Apply backoff.
@@ -233,28 +314,39 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
                 }
             }
         }
+
+        // Timeout detection
+        if self.backoff.is_maxed() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Error,
+                NetworkEventKind::Timeout,
+            );
+        }
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
         if let Some(stream) = &mut self.stream {
-            // We don't deal with the waker as this is processed externally
             match local_index.0 {
-                1 => {
-                    match self.writer.try_flush(stream) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            if e.kind() == io::ErrorKind::WouldBlock {
-                            } else {
-                                // Unexpected structural error. Restart gracefully.
-                                // Note that we drop packets here (the ones in flight in the writer).
-                                self.stream = None;
-                                self.writer = FrameWriter::new();
-                                self.backoff.mark_failed();
-                            }
+                1 => match self.writer.try_flush(stream) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                        } else {
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Error,
+                                NetworkEventKind::Disconnected { peer: self.addr },
+                            );
+                            self.stream = None;
+                            self.writer = FrameWriter::new();
+                            self.backoff.mark_failed();
                         }
                     }
-                }
+                },
                 _ => {
                     unreachable!();
                 }
@@ -264,20 +356,22 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
 
     #[inline(always)]
     /// Triggered when the waker is called
-    fn on_wake(&mut self) {
+    fn on_wake(&mut self, journal: &Journal) {
         if let Some(stream) = &mut self.stream {
             while let Some(msg) = self.queue.recv() {
-                // Expensive allocation here for now
                 self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
                 match self.writer.try_flush(stream) {
                     Ok(_) => {}
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            // We simply ignore and continue, should be recorded eventually for telemetry
                             break;
                         } else {
-                            // Unexpected structural error. Restart gracefully.
-                            // Note that we drop packets here (the ones in flight in the writer).
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Error,
+                                NetworkEventKind::Disconnected { peer: self.addr },
+                            );
                             self.stream = None;
                             self.writer = FrameWriter::new();
                             self.backoff.mark_failed();
@@ -317,16 +411,16 @@ impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Aggregate, Connect) {
 }
 
 impl<Msg: Serialize> NetworkEngine for TcpAggregateConnectEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex) {
-        self.on_event(local_index);
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self) {
-        self.on_tick();
+    fn on_tick(&mut self, journal: &Journal) {
+        self.on_tick(journal);
     }
 
-    fn on_wake(&mut self) {
-        self.on_wake();
+    fn on_wake(&mut self, journal: &Journal) {
+        self.on_wake(journal);
     }
 }
 
@@ -349,7 +443,6 @@ pub struct TcpBroadcastBindEngine<Msg> {
 
     addr: SocketAddr,
     queue: spsc::Receiver<Msg>,
-    waker: Arc<Waker>,
     registry: TokenRegistry,
 
     listener: Option<TcpListener>,
@@ -380,7 +473,6 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
             port_info,
             addr,
             queue: rx,
-            waker: waker.clone(),
             registry,
             clients: [const { None }; MAX_CLIENTS],
             _marker: PhantomData,
@@ -391,12 +483,19 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
         (engine, SendSocket::new(tx, waker))
     }
 
-    /// Tries to establish (or re-establish) the connection on a regular interval.
-    fn on_tick(&mut self) {
+    /// Tries to establish (or re-establish) the bind on a regular interval.
+    fn on_tick(&mut self, journal: &Journal) {
         if self.listener.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Info,
+                NetworkEventKind::Reconnecting {
+                    attempt: self.backoff.attempt(),
+                },
+            );
             match TcpListener::bind(self.addr) {
                 Ok(mut listener) => {
-                    // We register for writable events to be notified when the connection is closed.
                     let _ = self.registry.register(
                         &mut listener,
                         LocalIndex(LISTENER_INDEX),
@@ -404,65 +503,95 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
                     );
                     self.listener = Some(listener);
                     self.backoff.reset();
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Info,
+                        NetworkEventKind::Connected { peer: self.addr },
+                    );
                 }
                 Err(_) => {
-                    // Typical connection refused. Apply backoff.
                     self.backoff.mark_failed();
                 }
             }
         }
+
+        // Timeout detection
+        if self.backoff.is_maxed() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Error,
+                NetworkEventKind::Timeout,
+            );
+        }
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
         if let Some(listener) = &mut self.listener {
             match local_index.0 {
-                LISTENER_INDEX => {
-                    match listener.accept() {
-                        Ok((mut stream, addr)) => {
-                            let available_slot =
-                                self.clients.iter().position(|client| client.is_none());
-                            if available_slot.is_none() {
-                                // TODO: log error
-                                return;
-                            }
-                            let slot = available_slot.unwrap();
-                            let _ = set_nodelay(&stream);
-                            // We register for writable events to be notified when the connection is closed.
-                            let _ = self.registry.register(
-                                &mut stream,
-                                LocalIndex(slot),
-                                Interest::WRITABLE,
+                LISTENER_INDEX => match listener.accept() {
+                    Ok((mut stream, addr)) => {
+                        let available_slot =
+                            self.clients.iter().position(|client| client.is_none());
+                        if available_slot.is_none() {
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Error,
+                                NetworkEventKind::ChannelFull,
                             );
-                            self.clients[slot] = Some(BroadcastClient {
-                                stream,
-                                writer: FrameWriter::new(),
-                                remote_addr: addr,
-                            });
+                            return;
                         }
-                        Err(_) => {
-                            // Typical connection refused. Apply backoff.
-                            self.backoff.mark_failed();
-                        }
+                        let slot = available_slot.unwrap();
+                        let _ = set_nodelay(&stream);
+                        let _ = self.registry.register(
+                            &mut stream,
+                            LocalIndex(slot),
+                            Interest::WRITABLE,
+                        );
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Connected { peer: addr },
+                        );
+                        self.clients[slot] = Some(BroadcastClient {
+                            stream,
+                            writer: FrameWriter::new(),
+                            remote_addr: addr,
+                        });
                     }
-                }
+                    Err(_) => {
+                        self.backoff.mark_failed();
+                    }
+                },
                 _ => {
-                    // This handles `LocalIndex(slot)` for clients (0..MAX_CLIENTS)
                     let slot = local_index.0;
                     if slot < MAX_CLIENTS {
                         let mut disconnect = false;
+                        let mut peer_addr = None;
                         if let Some(client) = &mut self.clients[slot] {
                             match client.writer.try_flush(&mut client.stream) {
                                 Ok(_) => {}
                                 Err(e) => {
-                                    if e.kind() == io::ErrorKind::WouldBlock {
-                                    } else {
+                                    if e.kind() != io::ErrorKind::WouldBlock {
+                                        peer_addr = Some(client.remote_addr);
                                         disconnect = true;
                                     }
                                 }
                             }
                         }
                         if disconnect {
+                            if let Some(addr) = peer_addr {
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Warn,
+                                    NetworkEventKind::Disconnected { peer: addr },
+                                );
+                            }
                             self.clients[slot] = None;
                         }
                     }
@@ -472,26 +601,33 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
     }
 
     #[inline(always)]
-    fn on_wake(&mut self) {
+    fn on_wake(&mut self, journal: &Journal) {
         while let Some(msg) = self.queue.recv() {
-            // Bonus optimization: serialize once for all clients!
             let serialized = postcard::to_allocvec(&msg).unwrap();
             for client_opt in self.clients.iter_mut() {
                 let mut disconnect = false;
+                let mut peer_addr = None;
                 if let Some(client) = client_opt {
                     client.writer.enqueue(serialized.clone());
                     match client.writer.try_flush(&mut client.stream) {
                         Ok(_) => {}
                         Err(e) => {
-                            if e.kind() == io::ErrorKind::WouldBlock {
-                                // We simply ignore and continue, should be recorded eventually for telemetry
-                            } else {
+                            if e.kind() != io::ErrorKind::WouldBlock {
+                                peer_addr = Some(client.remote_addr);
                                 disconnect = true;
                             }
                         }
                     }
                 }
                 if disconnect {
+                    if let Some(addr) = peer_addr {
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Warn,
+                            NetworkEventKind::Disconnected { peer: addr },
+                        );
+                    }
                     *client_opt = None;
                 }
             }
@@ -526,16 +662,16 @@ impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Broadcast, Bind) {
 }
 
 impl<Msg: Serialize> NetworkEngine for TcpBroadcastBindEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex) {
-        self.on_event(local_index);
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self) {
-        self.on_tick();
+    fn on_tick(&mut self, journal: &Journal) {
+        self.on_tick(journal);
     }
 
-    fn on_wake(&mut self) {
-        self.on_wake();
+    fn on_wake(&mut self, journal: &Journal) {
+        self.on_wake(journal);
     }
 }
 
@@ -587,9 +723,17 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
         (engine, RecvSocket::new(rx))
     }
 
-    /// Tries to establish (or re-establish) the connection on a regular interval.
-    fn on_tick(&mut self) {
+    /// Tries to establish (or re-establish) the bind on a regular interval.
+    fn on_tick(&mut self, journal: &Journal) {
         if self.listener.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Info,
+                NetworkEventKind::Reconnecting {
+                    attempt: self.backoff.attempt(),
+                },
+            );
             match TcpListener::bind(self.addr) {
                 Ok(mut listener) => {
                     let _ = self.registry.register(
@@ -599,61 +743,106 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                     );
                     self.listener = Some(listener);
                     self.backoff.reset();
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Info,
+                        NetworkEventKind::Connected { peer: self.addr },
+                    );
                 }
                 Err(_) => {
-                    // Typical connection refused. Apply backoff.
                     self.backoff.mark_failed();
                 }
             }
         }
+
+        // Channel pressure telemetry
+        if self.queue.available() * 4 < self.queue.capacity() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Warn,
+                NetworkEventKind::ChannelCapacity75,
+            );
+        }
+        if self.queue.available() * 2 < self.queue.capacity() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Warn,
+                NetworkEventKind::ChannelCapacity50,
+            );
+        }
+
+        // Timeout detection
+        if self.backoff.is_maxed() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Error,
+                NetworkEventKind::Timeout,
+            );
+        }
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
         if let Some(listener) = &mut self.listener {
             match local_index.0 {
-                LISTENER_INDEX => {
-                    match listener.accept() {
-                        Ok((mut stream, addr)) => {
-                            let available_slot =
-                                self.clients.iter().position(|client| client.is_none());
-                            if available_slot.is_none() {
-                                // TODO: log error
-                                return;
-                            }
-                            let slot = available_slot.unwrap();
-                            let _ = set_nodelay(&stream);
-                            // We register for readable events to receive incoming data.
-                            let _ = self.registry.register(
-                                &mut stream,
-                                LocalIndex(slot),
-                                Interest::READABLE,
+                LISTENER_INDEX => match listener.accept() {
+                    Ok((mut stream, addr)) => {
+                        let available_slot =
+                            self.clients.iter().position(|client| client.is_none());
+                        if available_slot.is_none() {
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Error,
+                                NetworkEventKind::ChannelFull,
                             );
-                            self.clients[slot] = Some(AggregateClient {
-                                stream,
-                                reader: FrameReader::new(),
-                                remote_addr: addr,
-                            });
+                            return;
                         }
-                        Err(_) => {
-                            // Typical connection refused. Apply backoff.
-                            self.backoff.mark_failed();
-                        }
+                        let slot = available_slot.unwrap();
+                        let _ = set_nodelay(&stream);
+                        let _ = self.registry.register(
+                            &mut stream,
+                            LocalIndex(slot),
+                            Interest::READABLE,
+                        );
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Connected { peer: addr },
+                        );
+                        self.clients[slot] = Some(AggregateClient {
+                            stream,
+                            reader: FrameReader::new(),
+                            remote_addr: addr,
+                        });
                     }
-                }
+                    Err(_) => {
+                        self.backoff.mark_failed();
+                    }
+                },
                 _ => {
-                    // This handles `LocalIndex(slot)` for clients (0..MAX_CLIENTS)
                     let slot = local_index.0;
                     if slot < MAX_CLIENTS {
                         let mut disconnect = false;
+                        let mut peer_addr = None;
                         if let Some(client) = &mut self.clients[slot] {
                             match client.reader.try_read(&mut client.stream) {
                                 Ok(messages) => {
                                     for raw_msg in messages {
                                         if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
-                                            // Provide backpressure by dropping packets cleanly
-                                            // if the receiver is too slow.
-                                            let _ = self.queue.send(msg);
+                                            if self.queue.send(msg).is_err() {
+                                                log_event(
+                                                    journal,
+                                                    &self.port_info,
+                                                    LogLevel::Warn,
+                                                    NetworkEventKind::ChannelFull,
+                                                );
+                                            }
                                         }
                                     }
                                 }
@@ -661,14 +850,24 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                                     if e.kind() == io::ErrorKind::ConnectionReset
                                         || e.kind() == io::ErrorKind::Interrupted =>
                                 {
+                                    peer_addr = Some(client.remote_addr);
                                     disconnect = true;
                                 }
                                 Err(_) => {
+                                    peer_addr = Some(client.remote_addr);
                                     disconnect = true;
                                 }
                             }
                         }
                         if disconnect {
+                            if let Some(addr) = peer_addr {
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Warn,
+                                    NetworkEventKind::Disconnected { peer: addr },
+                                );
+                            }
                             self.clients[slot] = None;
                         }
                     }
@@ -677,7 +876,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
         }
     }
 
-    fn on_wake(&mut self) {}
+    fn on_wake(&mut self, _journal: &Journal) {}
 }
 
 // ── Factory Implementation ──────────────────────────────────────────────────
@@ -707,15 +906,15 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg> for (TCP, Aggregate, Bind) {
 }
 
 impl<Msg: DeserializeOwned> NetworkEngine for TcpAggregateBindEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex) {
-        self.on_event(local_index);
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self) {
-        self.on_tick();
+    fn on_tick(&mut self, journal: &Journal) {
+        self.on_tick(journal);
     }
 
-    fn on_wake(&mut self) {
-        self.on_wake();
+    fn on_wake(&mut self, journal: &Journal) {
+        self.on_wake(journal);
     }
 }

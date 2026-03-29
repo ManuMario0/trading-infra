@@ -14,6 +14,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use journal::journal::Journal;
 use mio::{Events, Poll, Token, Waker};
 
 use crate::dispatcher::EngineDispatcher;
@@ -74,9 +75,10 @@ impl<T: EngineDispatcher> IpcRunner<T> {
     }
 
     /// The blocking event loop.  Returns when shutdown is requested.
-    pub fn run(mut self) -> io::Result<()> {
+    pub fn run(mut self, journal: Journal) -> io::Result<()> {
         // Maximum time to sleep in poll before checking reconnect timers.
         let tick = Duration::from_millis(50);
+        let mut last_tick = std::time::Instant::now();
 
         loop {
             self.poll.poll(&mut self.events, Some(tick))?;
@@ -89,10 +91,10 @@ impl<T: EngineDispatcher> IpcRunner<T> {
                         shutdown = true;
                         break;
                     }
-                    self.engines.on_wake();
+                    self.engines.on_wake(&journal);
                 } else {
                     // Zero cost static dispatch directly to the correct engine
-                    self.engines.on_event(event.token());
+                    self.engines.on_event(event.token(), &journal);
                 }
             }
 
@@ -100,8 +102,12 @@ impl<T: EngineDispatcher> IpcRunner<T> {
                 break;
             }
 
-            // Reconnect timers
-            self.engines.on_tick();
+            // Reconnect timers every `tick` duration.
+            let now = std::time::Instant::now();
+            if now - last_tick >= tick {
+                self.engines.on_tick(&journal);
+                last_tick = now;
+            }
         }
 
         Ok(())
