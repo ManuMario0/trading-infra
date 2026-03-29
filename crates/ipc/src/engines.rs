@@ -167,6 +167,11 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
                         if e.kind() == io::ErrorKind::ConnectionReset
                             || e.kind() == io::ErrorKind::Interrupted =>
                     {
+                        if !self.is_established {
+                            self.stream = None;
+                            self.backoff.mark_failed();
+                            return;
+                        }
                         log_event(
                             journal,
                             &self.port_info,
@@ -178,6 +183,11 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
                         self.reader = FrameReader::new();
                     }
                     Err(_) => {
+                        if !self.is_established {
+                            self.stream = None;
+                            self.backoff.mark_failed();
+                            return;
+                        }
                         log_event(
                             journal,
                             &self.port_info,

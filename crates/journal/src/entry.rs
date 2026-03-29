@@ -9,6 +9,7 @@ pub enum ServiceKind {
     Ledger,
     Logger,
     Multiplexer,
+    Strategy,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]

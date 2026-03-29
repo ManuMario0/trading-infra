@@ -1,0 +1,11 @@
+[package]
+name = "strategy-wrapper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+service = { path = "../../../service" }
+journal = { path = "../../../journal" }
+ipc = { path = "../../../ipc" }
+trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }
+serde_json = "1.0.149"

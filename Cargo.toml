@@ -8,7 +8,8 @@ members = [
     "crates/journal",
     "crates/modules/kelly-multiplexer",
     "crates/forge/wrappers/multiplexer",
+    "crates/forge/wrappers/strategy",
     "crates/ledger", "crates/sync",
-    "crates/sync-lab",
+    "crates/sync-lab", "crates/modules/dummy-strategy",
 ]
 resolver = "2"

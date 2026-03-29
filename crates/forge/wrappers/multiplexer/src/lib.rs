@@ -7,8 +7,6 @@
 //! support while developing. Forge only generates a thin main.rs that
 //! wires the user module into this wrapper.
 
-pub mod port;
-
 use std::path::PathBuf;
 use std::thread;
 
@@ -69,7 +67,7 @@ pub fn run(
         runner,
         blueprint,
         _stop_handle,
-        mut market_data_socket,
+        mut allocation_input_socket,
         mut ledger_update_socket,
         mut execution_result_socket,
     ) = make_ipc!(
@@ -128,7 +126,7 @@ pub fn run(
     loop {
         std::hint::spin_loop();
 
-        while let Some(allocation_msg) = market_data_socket.try_recv() {
+        while let Some(allocation_msg) = allocation_input_socket.try_recv() {
             let batch = allocation_msg.payload;
             let source_id = allocation_msg.source;
             let context = Context {
