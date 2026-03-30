@@ -16,7 +16,7 @@ use sync::spsc;
 use crate::backoff::BackoffTimer;
 use crate::dispatcher::NetworkEngine;
 use crate::event::{NetworkEvent, NetworkEventKind, PortInfo};
-use crate::factory::{Aggregate, Bind, Broadcast, Connect, SocketFactory, TCP};
+use crate::factory::{Aggregate, Bind, Broadcast, Connect, PointToPoint, SocketFactory, TCP};
 use crate::framing::{FrameReader, FrameWriter};
 use crate::socket::{RecvSocket, SendSocket};
 use crate::token::{LocalIndex, TokenRegistry};
@@ -235,7 +235,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
 
 // ── Factory Implementation ──────────────────────────────────────────────────
 
-impl<Msg: DeserializeOwned> SocketFactory<Msg> for (TCP, Broadcast, Connect) {
+impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Broadcast, Connect) {
     type Engine = TcpBroadcastConnectEngine<Msg>;
     type Handle = RecvSocket<Msg>;
 
@@ -462,7 +462,7 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
 
 // ── Factory Implementation ──────────────────────────────────────────────────
 
-impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Aggregate, Connect) {
+impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Aggregate, Connect) {
     type Engine = TcpAggregateConnectEngine<Msg>;
     type Handle = SendSocket<Msg>;
 
@@ -713,7 +713,7 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
 
 // ── Factory Implementation ──────────────────────────────────────────────────
 
-impl<Msg: Serialize> SocketFactory<Msg> for (TCP, Broadcast, Bind) {
+impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Broadcast, Bind) {
     type Engine = TcpBroadcastBindEngine<Msg>;
     type Handle = SendSocket<Msg>;
 
@@ -957,7 +957,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
 
 // ── Factory Implementation ──────────────────────────────────────────────────
 
-impl<Msg: DeserializeOwned> SocketFactory<Msg> for (TCP, Aggregate, Bind) {
+impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Aggregate, Bind) {
     type Engine = TcpAggregateBindEngine<Msg>;
     type Handle = RecvSocket<Msg>;
 
@@ -982,6 +982,563 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg> for (TCP, Aggregate, Bind) {
 }
 
 impl<Msg: DeserializeOwned> NetworkEngine for TcpAggregateBindEngine<Msg> {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        self.on_event(local_index, journal);
+    }
+
+    fn on_tick(&mut self, journal: &Journal) {
+        self.on_tick(journal);
+    }
+
+    fn on_wake(&mut self, journal: &Journal) {
+        self.on_wake(journal);
+    }
+}
+
+// ── (TCP + PointToPoint + Bind) ──────────────────────────────────
+
+/// The native background engine for `(TCP, PointToPoint, Bind)`.
+pub struct TcpPointToPointBindEngine<Msg, RepMsg> {
+    /// Generic informations on the port for logging purposes
+    port_info: PortInfo,
+
+    addr: SocketAddr,
+    recv_queue: spsc::Sender<RepMsg>,
+    send_queue: spsc::Receiver<Msg>,
+    registry: TokenRegistry,
+
+    listener: Option<TcpListener>,
+    backoff: BackoffTimer,
+
+    client: Option<PointToPointClient>,
+}
+
+struct PointToPointClient {
+    stream: TcpStream,
+    reader: FrameReader,
+    writer: FrameWriter,
+    remote_addr: SocketAddr,
+}
+
+const POINT_TO_POINT_LISTENER_INDEX: usize = 0;
+const POINT_TO_POINT_CLIENT_WRITABLE_INDEX: usize = 1;
+const POINT_TO_POINT_CLIENT_READABLE_INDEX: usize = 2;
+
+impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, RepMsg> {
+    fn new(
+        port_info: PortInfo,
+        addr: SocketAddr,
+        capacity: usize,
+        registry: TokenRegistry,
+        waker: Arc<Waker>,
+    ) -> (Self, (RecvSocket<RepMsg>, SendSocket<Msg>)) {
+        let (recv_tx, recv_rx) = spsc::new(capacity);
+        let (send_tx, send_rx) = spsc::new(capacity);
+
+        let engine = Self {
+            port_info,
+            addr,
+            recv_queue: recv_tx,
+            send_queue: send_rx,
+            registry,
+            client: None,
+            backoff: BackoffTimer::default_network(),
+            listener: None,
+        };
+
+        (
+            engine,
+            (
+                RecvSocket::new(recv_rx),
+                SendSocket::new(send_tx, waker.clone()),
+            ),
+        )
+    }
+
+    /// Tries to establish (or re-establish) the bind on a regular interval.
+    fn on_tick(&mut self, journal: &Journal) {
+        if self.listener.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Info,
+                NetworkEventKind::Reconnecting {
+                    attempt: self.backoff.attempt(),
+                },
+            );
+            match TcpListener::bind(self.addr) {
+                Ok(mut listener) => {
+                    let _ = self.registry.register(
+                        &mut listener,
+                        LocalIndex(POINT_TO_POINT_LISTENER_INDEX),
+                        Interest::READABLE,
+                    );
+                    self.listener = Some(listener);
+                    self.backoff.reset();
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Info,
+                        NetworkEventKind::Connected { peer: self.addr },
+                    );
+                }
+                Err(_) => {
+                    self.backoff.mark_failed();
+                }
+            }
+        }
+
+        // Timeout detection
+        if self.backoff.is_maxed() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Error,
+                NetworkEventKind::Timeout,
+            );
+        }
+    }
+
+    /// Handles readable events fired by Mio on this port's specific token.
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        if let Some(listener) = &mut self.listener {
+            match local_index.0 {
+                POINT_TO_POINT_LISTENER_INDEX => match listener.accept() {
+                    Ok((mut stream, addr)) => {
+                        if self.client.is_some() {
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Error,
+                                NetworkEventKind::RejectedDuplicateClient { peer: addr },
+                            );
+                            return;
+                        }
+                        let _ = set_nodelay(&stream);
+                        let _ = self.registry.register(
+                            &mut stream,
+                            LocalIndex(POINT_TO_POINT_CLIENT_WRITABLE_INDEX),
+                            Interest::WRITABLE,
+                        );
+                        let _ = self.registry.register(
+                            &mut stream,
+                            LocalIndex(POINT_TO_POINT_CLIENT_READABLE_INDEX),
+                            Interest::READABLE,
+                        );
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Connected { peer: addr },
+                        );
+                        self.client = Some(PointToPointClient {
+                            stream,
+                            reader: FrameReader::new(),
+                            writer: FrameWriter::new(),
+                            remote_addr: addr,
+                        });
+                    }
+                    Err(_) => {
+                        self.backoff.mark_failed();
+                    }
+                },
+                POINT_TO_POINT_CLIENT_WRITABLE_INDEX => {
+                    let client = self.client.as_mut().unwrap();
+                    match client.writer.try_flush(&mut client.stream) {
+                        Ok(_) => {}
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                        Err(_) => {
+                            let peer_addr = client.remote_addr;
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Info,
+                                NetworkEventKind::Disconnected { peer: peer_addr },
+                            );
+                            self.client = None;
+                        }
+                    }
+                }
+                POINT_TO_POINT_CLIENT_READABLE_INDEX => {
+                    let client = self.client.as_mut().unwrap();
+                    match client.reader.try_read(&mut client.stream) {
+                        Ok(messages) => {
+                            for raw_msg in messages {
+                                if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg) {
+                                    if self.recv_queue.send(msg).is_err() {
+                                        log_event(
+                                            journal,
+                                            &self.port_info,
+                                            LogLevel::Warn,
+                                            NetworkEventKind::ChannelFull,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        Err(e)
+                            if e.kind() == io::ErrorKind::ConnectionReset
+                                || e.kind() == io::ErrorKind::Interrupted =>
+                        {
+                            let peer_addr = client.remote_addr;
+                            self.client = None;
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Info,
+                                NetworkEventKind::Disconnected { peer: peer_addr },
+                            );
+                        }
+                        Err(_) => {
+                            self.client = None;
+                            self.backoff.mark_failed();
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn on_wake(&mut self, journal: &Journal) {
+        let mut disconnected = false;
+        if let Some(client) = &mut self.client {
+            while let Some(msg) = self.send_queue.recv() {
+                client.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
+                match client.writer.try_flush(&mut client.stream) {
+                    Ok(true) => continue,
+                    Ok(false) => break,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(_) => {
+                        let peer_addr = client.remote_addr;
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Disconnected { peer: peer_addr },
+                        );
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if disconnected {
+            self.client = None;
+        }
+    }
+}
+
+// ── Factory Implementation ──────────────────────────────────────────────────
+
+impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
+    for (TCP, PointToPoint, Bind)
+{
+    type Engine = TcpPointToPointBindEngine<Msg, RepMsg>;
+    type Handle = (RecvSocket<RepMsg>, SendSocket<Msg>);
+
+    fn build(
+        name: &str,
+        addr: &str,
+        capacity: usize,
+        registry: TokenRegistry,
+        waker: Arc<Waker>,
+    ) -> (Self::Engine, Self::Handle) {
+        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP bind");
+        let port_info = PortInfo {
+            port_name: name.to_string(),
+            addr: addr.to_owned(),
+            transport: "TCP".to_string(),
+            kind: "PointToPoint".to_string(),
+            role: "Bind".to_string(),
+            capacity,
+        };
+        TcpPointToPointBindEngine::new(port_info, parsed_addr, capacity, registry, waker)
+    }
+}
+
+impl<Msg: Serialize, RepMsg: DeserializeOwned> NetworkEngine
+    for TcpPointToPointBindEngine<Msg, RepMsg>
+{
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        self.on_event(local_index, journal);
+    }
+
+    fn on_tick(&mut self, journal: &Journal) {
+        self.on_tick(journal);
+    }
+
+    fn on_wake(&mut self, journal: &Journal) {
+        self.on_wake(journal);
+    }
+}
+
+// ── (TCP + PointToPoint + Connect) ──────────────────────────────────
+
+/// The native background engine for `(TCP, PointToPoint, Connect)`.
+pub struct TcpPointToPointConnectEngine<Msg, RepMsg> {
+    /// Generic informations on the port for logging purposes
+    port_info: PortInfo,
+
+    addr: SocketAddr,
+    recv_queue: spsc::Sender<RepMsg>,
+    send_queue: spsc::Receiver<Msg>,
+    registry: TokenRegistry,
+
+    stream: Option<TcpStream>,
+    reader: FrameReader,
+    writer: FrameWriter,
+    backoff: BackoffTimer,
+
+    is_established: bool,
+}
+
+const POINT_TO_POINT_CONNECT_WRITABLE_INDEX: usize = 1;
+const POINT_TO_POINT_CONNECT_READABLE_INDEX: usize = 2;
+
+impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg, RepMsg> {
+    fn new(
+        port_info: PortInfo,
+        addr: SocketAddr,
+        capacity: usize,
+        registry: TokenRegistry,
+        waker: Arc<Waker>,
+    ) -> (Self, (RecvSocket<RepMsg>, SendSocket<Msg>)) {
+        let (recv_tx, recv_rx) = spsc::new(capacity);
+        let (send_tx, send_rx) = spsc::new(capacity);
+
+        let engine = Self {
+            port_info,
+            addr,
+            recv_queue: recv_tx,
+            send_queue: send_rx,
+            registry,
+            stream: None,
+            reader: FrameReader::new(),
+            writer: FrameWriter::new(),
+            backoff: BackoffTimer::default_network(),
+            is_established: false,
+        };
+
+        (
+            engine,
+            (
+                RecvSocket::new(recv_rx),
+                SendSocket::new(send_tx, waker.clone()),
+            ),
+        )
+    }
+
+    /// Tries to establish (or re-establish) the connection on a regular interval.
+    fn on_tick(&mut self, journal: &Journal) {
+        if self.stream.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Info,
+                NetworkEventKind::Reconnecting {
+                    attempt: self.backoff.attempt(),
+                },
+            );
+            match TcpStream::connect(self.addr) {
+                Ok(mut stream) => {
+                    let _ = self.registry.register(
+                        &mut stream,
+                        LocalIndex(POINT_TO_POINT_CONNECT_WRITABLE_INDEX),
+                        Interest::WRITABLE,
+                    );
+                    let _ = self.registry.register(
+                        &mut stream,
+                        LocalIndex(POINT_TO_POINT_CONNECT_READABLE_INDEX),
+                        Interest::READABLE,
+                    );
+
+                    let _ = set_nodelay(&stream);
+                    self.stream = Some(stream);
+                }
+                Err(_) => {
+                    self.backoff.mark_failed();
+                }
+            }
+        }
+
+        if self.backoff.is_maxed() {
+            log_event(
+                journal,
+                &self.port_info,
+                LogLevel::Error,
+                NetworkEventKind::Timeout,
+            );
+        }
+    }
+
+    /// Handles readable/writable events fired by Mio on this port's specific tokens.
+    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+        if let Some(stream) = &mut self.stream {
+            match local_index.0 {
+                POINT_TO_POINT_CONNECT_WRITABLE_INDEX => {
+                    if !self.is_established {
+                        match stream.take_error() {
+                            Ok(None) => {
+                                self.is_established = true;
+                                self.backoff.reset();
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Info,
+                                    NetworkEventKind::Connected { peer: self.addr },
+                                );
+                            }
+                            _ => {
+                                self.stream = None;
+                                self.backoff.mark_failed();
+                                return;
+                            }
+                        }
+                    }
+
+                    match self.writer.try_flush(stream) {
+                        Ok(_) => {}
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                        Err(_) => {
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Error,
+                                NetworkEventKind::Disconnected { peer: self.addr },
+                            );
+                            self.stream = None;
+                            self.is_established = false;
+                            self.writer = FrameWriter::new();
+                            self.reader = FrameReader::new();
+                            self.backoff.mark_failed();
+                        }
+                    }
+                }
+                POINT_TO_POINT_CONNECT_READABLE_INDEX => match self.reader.try_read(stream) {
+                    Ok(messages) => {
+                        for raw_msg in messages {
+                            if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg) {
+                                if self.recv_queue.send(msg).is_err() {
+                                    log_event(
+                                        journal,
+                                        &self.port_info,
+                                        LogLevel::Warn,
+                                        NetworkEventKind::ChannelFull,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(e)
+                        if e.kind() == io::ErrorKind::ConnectionReset
+                            || e.kind() == io::ErrorKind::Interrupted =>
+                    {
+                        if !self.is_established {
+                            self.stream = None;
+                            self.backoff.mark_failed();
+                            return;
+                        }
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Disconnected { peer: self.addr },
+                        );
+                        self.stream = None;
+                        self.is_established = false;
+                        self.writer = FrameWriter::new();
+                        self.reader = FrameReader::new();
+                    }
+                    Err(_) => {
+                        if !self.is_established {
+                            self.stream = None;
+                            self.backoff.mark_failed();
+                            return;
+                        }
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Error,
+                            NetworkEventKind::Disconnected { peer: self.addr },
+                        );
+                        self.stream = None;
+                        self.is_established = false;
+                        self.writer = FrameWriter::new();
+                        self.reader = FrameReader::new();
+                        self.backoff.mark_failed();
+                    }
+                },
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn on_wake(&mut self, journal: &Journal) {
+        let mut disconnected = false;
+        if let Some(stream) = &mut self.stream {
+            while let Some(msg) = self.send_queue.recv() {
+                self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
+                match self.writer.try_flush(stream) {
+                    Ok(true) => continue,
+                    Ok(false) => break,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(_) => {
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Disconnected { peer: self.addr },
+                        );
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if disconnected {
+            self.stream = None;
+            self.is_established = false;
+            self.writer = FrameWriter::new();
+            self.reader = FrameReader::new();
+            self.backoff.mark_failed();
+        }
+    }
+}
+
+// ── Factory Implementation ──────────────────────────────────────────────────
+
+impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
+    for (TCP, PointToPoint, Connect)
+{
+    type Engine = TcpPointToPointConnectEngine<Msg, RepMsg>;
+    type Handle = (RecvSocket<RepMsg>, SendSocket<Msg>);
+
+    fn build(
+        name: &str,
+        addr: &str,
+        capacity: usize,
+        registry: TokenRegistry,
+        waker: Arc<Waker>,
+    ) -> (Self::Engine, Self::Handle) {
+        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
+        let port_info = PortInfo {
+            port_name: name.to_string(),
+            addr: addr.to_owned(),
+            transport: "TCP".to_string(),
+            kind: "PointToPoint".to_string(),
+            role: "Connect".to_string(),
+            capacity,
+        };
+        TcpPointToPointConnectEngine::new(port_info, parsed_addr, capacity, registry, waker)
+    }
+}
+
+impl<Msg: Serialize, RepMsg: DeserializeOwned> NetworkEngine
+    for TcpPointToPointConnectEngine<Msg, RepMsg>
+{
     fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
         self.on_event(local_index, journal);
     }

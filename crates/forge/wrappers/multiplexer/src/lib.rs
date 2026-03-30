@@ -55,12 +55,10 @@ pub fn run(
     info: ModuleInfo,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Acquire addresses
-    let allocation_input_addr =
-        env::parse_or("ALLOCATION_INPUT_ADDR", "127.0.0.1:8001".to_string());
+    let allocation_input_addr = env::parse_or("ALLOCATION_INPUT", "127.0.0.1:8001".to_string());
     let ledger_update_input_addr =
-        env::parse_or("LEDGER_UPDATE_INPUT_ADDR", "127.0.0.1:8002".to_string());
-    let allocation_output_addr =
-        env::parse_or("ALLOCATION_OUTPUT_ADDR", "127.0.0.1:8003".to_string());
+        env::parse_or("LEDGER_UPDATE_INPUT", "127.0.0.1:8002".to_string());
+    let allocation_output_addr = env::parse_or("ALLOCATION_OUTPUT", "127.0.0.1:8003".to_string());
 
     // Setup IPC
     let (

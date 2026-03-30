@@ -1,15 +1,24 @@
 #[macro_export]
 macro_rules! make_ipc {
+    // Internal helper for building the factory call with one type
+    (@build $transport:ident, $kind:ident, $role:ident, $tx:ty, (), $name:expr, $addr:expr, $cap:expr, $reg:expr, $waker:expr) => {
+        <($crate::factory::$transport, $crate::factory::$kind, $crate::factory::$role) as $crate::factory::SocketFactory<$tx, ()>>::build($name, $addr, $cap, $reg, $waker)
+    };
+
+    // Internal helper for building the factory call with two types
+    (@build $transport:ident, $kind:ident, $role:ident, $tx:ty, ($rx:ty), $name:expr, $addr:expr, $cap:expr, $reg:expr, $waker:expr) => {
+        <($crate::factory::$transport, $crate::factory::$kind, $crate::factory::$role) as $crate::factory::SocketFactory<$tx, $rx>>::build($name, $addr, $cap, $reg, $waker)
+    };
+
     (
         $(
-            $name:ident : kind=$kind:ident, role=$role:ident, capacity=$cap:expr, ty=$msg_type:ty, addr=$addr:expr, transport=$transport:ident
+            $name:ident : kind=$kind:ident, role=$role:ident, capacity=$cap:expr, ty=$msg_type:ty, $(rep_ty=$rep_msg_type:ty,)? addr=$addr:expr, transport=$transport:ident
         ),* $(,)?
     ) => {{
         use std::sync::Arc;
         use $crate::{Poll, Waker};
         use $crate::token::TokenRegistry;
         use $crate::runner::{IpcRunner, IpcHandle, WAKER_TOKEN};
-        use $crate::factory::SocketFactory;
         use $crate::blueprint::{Blueprint, PortDefinition};
         use $crate::socket::{SocketKind, SocketRole};
 
@@ -31,12 +40,14 @@ macro_rules! make_ipc {
         let pairs = __MacroPairs {
             $(
                 $name: {
-                    let pair = <($crate::factory::$transport, $crate::factory::$kind, $crate::factory::$role) as SocketFactory<$msg_type>>::build(
+                    let pair = $crate::make_ipc!(@build
+                        $transport, $kind, $role, $msg_type,
+                        ($($rep_msg_type)?),
                         stringify!($name),
                         $addr,
                         $cap,
                         TokenRegistry::new(_prefix_counter, registry.clone()),
-                        waker.clone(),
+                        waker.clone()
                     );
                     _prefix_counter += 1;
                     pair

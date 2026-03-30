@@ -56,6 +56,11 @@ pub enum NetworkEventKind {
     ChannelCapacity75,
     ChannelFull,
 
+    /// A remote client tried to connect on an already bind point-to-point server.
+    RejectedDuplicateClient {
+        peer: SocketAddr,
+    },
+
     /// OS / System-level operational error.
     Error(NetworkError),
 }

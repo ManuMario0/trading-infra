@@ -39,7 +39,7 @@ pub struct Connect;
 
 /// A factory that produces a highly-specialized `Engine` and user-facing `Handle`
 /// based on the specific `(Transport, Kind, Role)` combination required.
-pub trait SocketFactory<Msg> {
+pub trait SocketFactory<Tx, Rx = ()> {
     /// The background network-thread struct (e.g., `TcpBroadcastConnectEngine`).
     /// This struct handles raw Mio events, TCP framing, and serialization.
     type Engine;
