@@ -188,7 +188,7 @@ impl<C> Receiver<C> {
 
         // Amortized store: Only update the shared tail every 32 messages
         // to reduce atomic traffic and cache-line bouncing.
-        if (next_tail & 31) == 0 {
+        if (next_tail & (if self.channel.capacity > 64 { 31 } else { 1 })) == 0 {
             self.channel.tail.store(next_tail, Ordering::Release);
             self.is_tail_up_to_date.set(true);
         }

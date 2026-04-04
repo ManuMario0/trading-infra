@@ -12,5 +12,6 @@ members = [
     "crates/forge/wrappers/manager",
     "crates/ledger", "crates/sync",
     "crates/sync-lab", "crates/modules/dummy-strategy",
+    "crates/modules/iex-tops-feeder",
 ]
 resolver = "2"
