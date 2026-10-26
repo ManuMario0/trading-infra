@@ -1,3 +1,5 @@
+//! Performance harness of the sync library. Once replacement wiht cachec library is done, this should go.
+
 mod cli;
 mod mpsc;
 mod spsc;

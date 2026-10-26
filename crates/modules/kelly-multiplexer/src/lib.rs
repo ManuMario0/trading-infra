@@ -9,7 +9,7 @@ use trading_sdk::model::ledger::LedgerUpdate;
 pub struct KellyMultiplexer {
     // Current state of the account
     pub ledger: Option<LedgerUpdate>,
-    // You might want to store a list of current target allocations
+    // Might want to store a list of current target allocations
 }
 
 impl Multiplexist for KellyMultiplexer {

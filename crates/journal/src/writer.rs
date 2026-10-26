@@ -65,6 +65,9 @@ impl Writer {
         Ok(())
     }
 
+    /// Rename the temporary file to a definitive name and open a new temporary file for log writing.
+    ///
+    /// Having a temporary names prevents any type of later automatic log gatherer to aggressively pull and delete current working file.
     fn rotate(&mut self) -> Result<(), std::io::Error> {
         // 1. Flush the mmap to disk
         self.mapped_region.as_mut().unwrap().flush()?;

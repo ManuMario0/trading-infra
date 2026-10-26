@@ -6,7 +6,10 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Display,
+    time::{SystemTime, UNIX_EPOCH},
 };
+
+use trading_sdk::{MarketDataBatch, journal::lineage::LineageId};
 
 use crate::parser::QuoteUpdateMessage;
 
@@ -185,6 +188,32 @@ impl SoaBookKeeper {
         self.ask_price[idx] = update.ask_price;
         self.bid_size[idx] = update.bid_size;
         self.ask_size[idx] = update.ask_size;
+    }
+
+    pub fn into_market_data_batch(&self, lineage_id: LineageId) -> MarketDataBatch {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut batch = MarketDataBatch {
+            lineage_id,
+            instrument_ids: vec![],
+            bid_prices: vec![],
+            ask_prices: vec![],
+            last_prices: vec![],
+            timestamps: vec![],
+        };
+        for (index, instrument_id) in self.symbols.iter().enumerate() {
+            if *instrument_id != 0 {
+                batch.instrument_ids.push(*instrument_id as usize);
+                batch.bid_prices.push(self.bid_price[index]);
+                batch.ask_prices.push(self.ask_price[index]);
+                batch.last_prices.push(self.ask_price[index]);
+                batch.timestamps.push(timestamp);
+            }
+        }
+        batch
     }
 }
 

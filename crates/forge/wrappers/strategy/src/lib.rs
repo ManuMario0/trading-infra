@@ -70,7 +70,7 @@ pub fn run(
         mut execution_result_socket,
     ) = make_ipc!(
         MARKET_DATA_INPUT: kind=Broadcast, role=Connect, capacity=1024, ty=MarketDataBatch, addr=&market_data_input_addr, transport=TCP,
-        LEDGER_UPDATE_INPUT: kind=Aggregate, role=Connect, capacity=1024, ty=Envelope<LedgerUpdate>, addr=&ledger_update_input_addr, transport=TCP,
+        LEDGER_UPDATE_INPUT: kind=Broadcast, role=Connect, capacity=1024, ty=Envelope<LedgerUpdate>, addr=&ledger_update_input_addr, transport=TCP,
         ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_output_addr, transport=TCP,
     );
 
@@ -85,7 +85,7 @@ pub fn run(
     // Checks if the flag manifest is set
     let is_manifest_request = env::parse_or(env::MANIFEST_REQUEST, false);
     if is_manifest_request {
-        println!("{}", serde_json::to_string(&manifest).unwrap());
+        println!("{}", manifest.json_serialize().unwrap());
         return Ok(());
     }
 
@@ -118,8 +118,6 @@ pub fn run(
     let _startup_lineage = journal
         .log(ThreadKind::Main, vec![], LogLevel::Info, startup_event)
         .unwrap(); // crash if initial log fails
-
-    println!("Starting Strategy Wrapper...");
 
     loop {
         std::hint::spin_loop();

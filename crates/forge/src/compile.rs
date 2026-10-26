@@ -17,7 +17,7 @@ pub fn compile(build_dir: &Path, package_name: &str) -> bool {
 
     if status.success() {
         println!(
-            "Success! Executable is at {}/target/debug/{}-wrapper",
+            "Success! Executable is at {}/target/debug/{}-forged",
             build_dir.display(),
             package_name
         );

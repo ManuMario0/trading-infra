@@ -55,7 +55,7 @@ impl ServiceInfo {
         // Inject ports
         for (i, port_def) in manifest.blueprint.all_ports().enumerate() {
             let env_name = format!("{}_{}", service::env::IPC_INPUT, port_def.name());
-            command.env(env_name, ports[i].to_string());
+            command.env(port_def.name(), ports[i].to_string());
         }
 
         let child = command.spawn().map_err(|e| ServiceBootError {
@@ -75,7 +75,7 @@ impl ServiceInfo {
     }
 }
 
-fn acquire_manifest(
+pub fn acquire_manifest(
     path: PathBuf,
     mut context: Context,
 ) -> Result<service::manifest::Manifest, ServiceBootError> {

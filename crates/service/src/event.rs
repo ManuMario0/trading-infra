@@ -1,4 +1,6 @@
-//! Service lifetime events
+//! Service lifetime events.
+//!
+//! We define the service event type here to have a unified journal accross all the different services.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,4 +13,5 @@ pub struct ServiceLifetimeEvent {
 #[derive(Serialize, Deserialize)]
 pub enum ServiceEventKind {
     Startup,
+    Info(String),
 }

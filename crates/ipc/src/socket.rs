@@ -1,12 +1,10 @@
 //! Typed sockets — the user-facing handles to the IPC channels.
 //!
-//! After calling `IpcInit::build`, the caller receives a `Vec<RawSocket>`
-//! (one per port in the blueprint).  These raw handles are type-erased;
-//! wrap them in `TypedSender` / `TypedReceiver` for ergonomic use.
+//!
 //!
 //! # Direction convention
 //! - `SendSocket<T>` — user writes, network reads and sends.
-//! - `RecvSocket<T>` — network reads and writes here, user reads.
+//! - `RecvSocket<T>` — network receives and writes here, user reads.
 
 use std::sync::Arc;
 
@@ -60,10 +58,8 @@ impl<T> SendSocket<T> {
     /// bottlenecks and reporting telemetry.
     #[inline(always)]
     pub fn send(&mut self, value: T) {
-        if self.channel.send(value).is_ok() {
-            // Best-effort wake — ignore transient OS errors.
-            let _ = self.waker.wake();
-        }
+        let _ = self.channel.send(value);
+        let _ = self.waker.wake();
     }
 }
 

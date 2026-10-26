@@ -31,7 +31,7 @@ impl Address {
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Address::TCP(addr) => write!(f, "tcp://{}", addr),
+            Address::TCP(addr) => write!(f, "{}", addr),
         }
     }
 }

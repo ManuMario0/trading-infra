@@ -1,7 +1,7 @@
 //! The network thread entry point.
 //!
 //! `IpcRunner<T>` is the blocking event loop that lives on the dedicated
-//! network thread.  `IpcHandle` is the lightweight, `Clone`-able control
+//! network thread. `IpcHandle` is the lightweight, `Clone`-able control
 //! surface that lives on any other thread.
 //!
 //! Because the topology is **static** (all ports known at init time), there is
@@ -26,7 +26,7 @@ pub const WAKER_TOKEN: Token = Token(usize::MAX);
 
 /// The user-facing control handle for the network thread.
 ///
-/// Cheap to clone.  Thread-safe.
+/// Cheap to clone. Thread-safe.
 #[derive(Clone)]
 pub struct IpcHandle {
     pub(crate) waker: Arc<Waker>,
@@ -80,26 +80,19 @@ impl<T: EngineDispatcher> IpcRunner<T> {
         let tick = Duration::from_millis(50);
         let mut last_tick = std::time::Instant::now();
 
-        loop {
+        'main_loop: loop {
             self.poll.poll(&mut self.events, Some(tick))?;
-
-            let mut shutdown = false;
 
             for event in &self.events {
                 if event.token() == WAKER_TOKEN {
                     if SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
-                        shutdown = true;
-                        break;
+                        break 'main_loop;
                     }
                     self.engines.on_wake(&journal);
                 } else {
                     // Zero cost static dispatch directly to the correct engine
                     self.engines.on_event(event.token(), &journal);
                 }
-            }
-
-            if shutdown {
-                break;
             }
 
             // Reconnect timers every `tick` duration.

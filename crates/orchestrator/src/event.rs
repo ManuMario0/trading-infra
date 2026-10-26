@@ -1,3 +1,7 @@
+//! Events used by the orchestrator.
+//!
+//! We structure them for easier processing later down the line.
+
 use std::{collections::BTreeMap, path::PathBuf};
 
 use ipc::address::Address;
@@ -7,12 +11,14 @@ use trading_sdk::identity::ServiceId;
 
 use crate::service::error::ServiceBootError;
 
+/// An event from the orchestrator.
 #[derive(Serialize, Deserialize)]
 pub enum OrchestratorEvent {
     Command(CommandEvent),
     Lifecycle(LifecycleEvent),
 }
 
+/// A life cycle event is an event that is related to the internal working of the orchestrator, to keep track of it's actions.
 #[derive(Serialize, Deserialize)]
 pub enum LifecycleEvent {
     Startup {
@@ -29,6 +35,9 @@ pub enum LifecycleEvent {
     ServiceSpawnFailed(ServiceBootError),
 }
 
+/// A command event is an event triggered by the user.
+///
+/// Everytime a user enters a commant, it is recorded in the journal.
 #[derive(Serialize, Deserialize, Clone)]
 pub enum CommandEvent {
     Deploy {

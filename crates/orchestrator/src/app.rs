@@ -1,6 +1,13 @@
+//! Bootstrap of the orchestrator.
+//!
+//! It gets all the environment variables loaded and launch it's internal journal.
+//!
+//! This file is slightly too big but will get reformated.
+
 use std::path::PathBuf;
 use std::thread;
 
+use service::manifest::Manifest;
 use trading_sdk::journal::lineage::LineageId;
 
 use journal::entry::{LogLevel, ServiceKind, ThreadKind};
@@ -11,7 +18,8 @@ use service::make_identity;
 
 use crate::event::{CommandEvent, LifecycleEvent, OrchestratorEvent};
 use crate::port::allocator::Allocator;
-use crate::service::error::Context;
+use crate::service::boot;
+use crate::service::error::{Context, ServiceBootError};
 use crate::service::info::ServiceInfo;
 use crate::service::registry::ServiceRegistry;
 use crate::service_id::ServiceIdAllocator;
@@ -123,6 +131,19 @@ impl App {
                 );
                 match service_info {
                     Ok(service_info) => {
+                        println!(
+                            "Started service {} with id {}",
+                            service_info.manifest.name,
+                            service_info.identifier.get_inner()
+                        );
+                        println!("List of attributed port numbers:");
+                        for (p, d) in service_info
+                            .ports
+                            .iter()
+                            .zip(service_info.manifest.blueprint.all_ports())
+                        {
+                            println!("{}: {p}", d.name());
+                        }
                         let event = OrchestratorEvent::Lifecycle(LifecycleEvent::ServiceSpawned {
                             path: service_path,
                             service_id: service_info.identifier,
@@ -157,5 +178,14 @@ impl App {
             }
             CommandEvent::Stop { service_id: _ } => (),
         }
+    }
+
+    /// Returns the manifest of a service if possible.
+    pub fn acquire_manifest(
+        &self,
+        path: PathBuf,
+        context: Context,
+    ) -> Result<Manifest, ServiceBootError> {
+        boot::acquire_manifest(path, context)
     }
 }

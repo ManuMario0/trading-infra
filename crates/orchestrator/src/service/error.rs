@@ -1,9 +1,15 @@
 //! Boot error.
+//!
+//! This kind of errors is used to report any problems during the startup of a service.
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// A context is a useful structure that carries the sequence of internal actions that led to
+/// the specific failure mode.
+///
+/// For now, the structure is extremely inefficient, should be improved to avoid regular cloning in the future.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Context {
     context: Vec<String>,
@@ -21,6 +27,7 @@ impl Context {
     }
 }
 
+/// The kind of error.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RuntimeErrorKind {
     /// Some OS command failed (e.g., bin not found, permissions, pipe failed).
@@ -35,6 +42,7 @@ pub enum RuntimeErrorKind {
     InternalError { reason: String },
 }
 
+/// A service boot error.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ServiceBootError {
     // Who is the service

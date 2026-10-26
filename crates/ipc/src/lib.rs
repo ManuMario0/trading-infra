@@ -11,7 +11,7 @@
 //!     DATA_IN: kind=Aggregate, role=Bind, capacity=1024, ty=u64, addr="127.0.0.1:9000", transport=TCP
 //! };
 //!
-//! // 2. Spawn the zero-cost optimal network event loop
+//! // 2. Spawn the network event loop
 //! std::thread::spawn(move || {
 //!     runner.run().unwrap();
 //! });

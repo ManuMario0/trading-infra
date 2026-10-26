@@ -128,27 +128,27 @@ pub fn run(
         std::hint::spin_loop();
 
         while let Some(allocation_msg) = allocation_input_socket.try_recv() {
-            let mut jouranl_wrapper = JournalWrapper { journal: &journal };
+            let mut journal_wrapper = JournalWrapper { journal: &journal };
             let context = Context {
-                journal: &mut jouranl_wrapper,
+                journal: &mut journal_wrapper,
             };
             if let Some(target) = manager.on_allocation(context, allocation_msg.payload) {
                 target_socket.send(target);
             }
         }
         while let Some(market_data_msg) = market_data_socket.try_recv() {
-            let mut jouranl_wrapper = JournalWrapper { journal: &journal };
+            let mut journal_wrapper = JournalWrapper { journal: &journal };
             let context = Context {
-                journal: &mut jouranl_wrapper,
+                journal: &mut journal_wrapper,
             };
             if let Some(target) = manager.on_market_data(context, market_data_msg) {
                 target_socket.send(target);
             }
         }
         while let Some(actual_msg) = actual_socket.try_recv() {
-            let mut jouranl_wrapper = JournalWrapper { journal: &journal };
+            let mut journal_wrapper = JournalWrapper { journal: &journal };
             let context = Context {
-                journal: &mut jouranl_wrapper,
+                journal: &mut journal_wrapper,
             };
             if let Some(target) = manager.on_portfolio(context, actual_msg) {
                 target_socket.send(target);

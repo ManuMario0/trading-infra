@@ -9,6 +9,9 @@ use service::manifest::Manifest;
 ///
 /// This structure will get more complex as the interactions
 /// between the orchestrator and the services becomes more complex.
+///
+/// It holds all the necessary informations necessary to allow the orchestrator to keep track
+/// and interact with a running process.
 pub struct ServiceInfo {
     pub handle: Child,
     pub identifier: ServiceId,

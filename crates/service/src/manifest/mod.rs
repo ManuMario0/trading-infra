@@ -1,34 +1,43 @@
-//! Defines the shape of the service.
+//! Defines what the service is and how it interacts.
 //!
-//! This includes:
-//! - Inputs and outputs, alongside the expected types
-//! - Instance specific parameters
+//! It provides all the necessary informations for the orchestrator to:
+//! - inform and inform the end user of the exact services that are available for deployement and
+//! - when deployed, setup communications.
 //!
-//! At startup, those are provided to the service as environment variables.
-//!
-//! However, some parameters environment variables are always present for all processes
-//! and must not be specify in the manifest. For example, the environment variable
-//! `IPC_LOGGER` is always set and can be used safely to setup the logger.
+//! For more details on how to specify the communication layout, see [`ipc::blueprint`].
 
 use ipc::blueprint::Blueprint;
 use serde::{Deserialize, Serialize};
 
 pub use ipc::blueprint::PortDefinition;
 
-/// A manifest describes what a process is and what it requires at startup.
+/// Defines what the service is and how it interacts.
 ///
-/// Think of the manifest as the identity card of a microservice, one should
-/// be able to start the process correctly and pipe it with only being aware
-/// of its manifest.
-///
-/// A service should be self descriptive, that is, a service should output
-/// the manifest in stdout and yield if some expected environemnt variable
-/// does not exists.
+/// For more details see [`self`].
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Manifest {
+    /// The communication layout.
+    ///
+    /// See [`ipc::blueprint`] for details.
     pub blueprint: Blueprint,
+
+    /// The name of the service.
     pub name: String,
+
+    /// The version of the service.
     pub version: String,
+
+    /// The description of the service.
     pub description: String,
+
+    /// The type of the service.
+    ///
+    /// Examples include manager, multiplexer or strategy.
     pub service_type: String,
+}
+
+impl Manifest {
+    pub fn json_serialize(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&self)
+    }
 }

@@ -208,6 +208,10 @@ impl<C> Receiver<C> {
         self.channel.capacity - (head - tail)
     }
 
+    pub fn capacity(&self) -> u64 {
+        self.channel.capacity
+    }
+
     // Local implementation
 
     #[inline(always)]

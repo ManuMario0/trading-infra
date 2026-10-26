@@ -70,7 +70,7 @@ pub fn run(
         mut execution_result_socket,
     ) = make_ipc!(
         ALLOCATION_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_input_addr, transport=TCP,
-        LEDGER_UPDATE_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<LedgerUpdate>, addr=&ledger_update_input_addr, transport=TCP,
+        LEDGER_UPDATE_INPUT: kind=Broadcast, role=Connect, capacity=1024, ty=Envelope<LedgerUpdate>, addr=&ledger_update_input_addr, transport=TCP,
         ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_output_addr, transport=TCP,
     );
 

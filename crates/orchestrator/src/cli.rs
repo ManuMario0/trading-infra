@@ -3,8 +3,11 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
+use ipc::socket::SocketRole;
+
 use crate::app::App;
 use crate::event::CommandEvent;
+use crate::service::error::Context;
 
 pub fn run_cli(app: &mut App) {
     // Bootup main loop
@@ -31,34 +34,51 @@ pub fn run_cli(app: &mut App) {
 
                 let service_path = std::path::PathBuf::from(path_input.trim());
 
+                let manifest = match app.acquire_manifest(service_path.clone(), Context::new()) {
+                    Ok(manifest) => manifest,
+                    Err(_) => {
+                        println!("Cannot read the manifest of the service");
+                        continue;
+                    }
+                };
+
                 let mut addr_map = BTreeMap::new();
                 println!(
                     "Enter port overrides (FORMAT: PORT_NAME:address, e.g. LOGS:tcp://127.0.0.1:5000)"
                 );
-                println!("Press ENTER on an empty line to finish and deploy.");
-                loop {
-                    print!("Override: ");
-                    io::stdout().flush().unwrap();
-                    let mut override_input = String::new();
-                    io::stdin().read_line(&mut override_input).unwrap();
-                    let trimmed = override_input.trim();
-                    if trimmed.is_empty() {
-                        break;
-                    }
 
-                    if let Some((name, addr_str)) = trimmed.split_once(':') {
-                        let name = name.trim().to_string();
-                        let addr_str = addr_str.trim();
-                        match addr_str.parse::<ipc::address::Address>() {
-                            Ok(addr) => {
-                                addr_map.insert(name, addr);
+                for p in manifest.blueprint.all_ports() {
+                    let mut success = false;
+                    while !success {
+                        match p.role {
+                            SocketRole::Bind => {
+                                print!("{} (auto assign possible): ", p.name());
                             }
-                            Err(e) => {
-                                println!("-> Error: Invalid address '{}': {}", addr_str, e);
+                            SocketRole::Connect => {
+                                print!("{}: ", p.name());
                             }
                         }
-                    } else {
-                        println!("-> Error: Invalid format. Use PORT_NAME:address");
+                        io::stdout().flush().unwrap();
+                        let mut override_input = String::new();
+                        io::stdin().read_line(&mut override_input).unwrap();
+                        let trimmed = override_input.trim();
+                        if !trimmed.is_empty() {
+                            match trimmed.parse::<ipc::address::Address>() {
+                                Ok(addr) => {
+                                    addr_map.insert(p.name().to_string(), addr);
+                                    success = true;
+                                }
+                                Err(e) => {
+                                    println!("-> Error: Invalid address '{}': {}", trimmed, e);
+                                }
+                            }
+                        } else {
+                            if p.role == SocketRole::Bind {
+                                success = true;
+                            } else {
+                                println!("You have to enter an address for this socket");
+                            }
+                        }
                     }
                 }
 

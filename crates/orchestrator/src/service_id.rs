@@ -1,4 +1,10 @@
-//! Service ID allocator
+//! Service ID allocator.
+//!
+//! It provides an automatic tracker of allocated ID. Considering that we have the possibility of launching up to
+//! 2^20 services on one machine, we don't recycle the ID (which is extremely useful for full reconstruction of log events,
+//! as every single ID represent exactly one services than ran at some point).
+//!
+//! It uses the node id to build unique IDs for the services on the specific node.
 
 use trading_sdk::identity::ServiceId;
 

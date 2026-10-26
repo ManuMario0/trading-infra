@@ -1,4 +1,6 @@
 //! Service registry.
+//!
+//! I am slightly unsure of its usefulness as it appears to not have any querying functions on the registry.
 
 use std::{collections::BTreeMap, path::PathBuf};
 
