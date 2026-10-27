@@ -67,8 +67,7 @@ impl App {
         );
         std::fs::create_dir_all(&logging_dir).unwrap_or_else(|_| ());
 
-        let (journal, mut journal_runner) = Journal::init(
-            1024,
+        let (mut journal, mut journal_runner) = Journal::init(
             orchestrator_identity.identifier,
             ServiceKind::Orchestrator,
             PathBuf::from(working_dir.clone()),

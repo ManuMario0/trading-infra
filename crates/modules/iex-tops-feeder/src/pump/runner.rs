@@ -5,17 +5,18 @@ use std::os::unix::fs::FileExt;
 use std::thread;
 use std::time::Duration;
 
-use sync::spsc;
+use cachec::channel::spsc;
 
 use crate::pump::block::DataBlock;
+use crate::pump::cursor::CHANNEL_SIZE;
 
 pub struct DataPumpRunner {
     /// The file to read from
     file: fs::File,
     /// The recycled blocks to fill
-    recycled: spsc::Receiver<DataBlock>,
+    recycled: spsc::Consumer<DataBlock, CHANNEL_SIZE>,
     /// The channel to send filled blocks to
-    outbound: spsc::Sender<DataBlock>,
+    outbound: spsc::Producer<DataBlock, CHANNEL_SIZE>,
     /// The total number of runners
     num_runners: usize,
     /// The current offset
@@ -28,8 +29,8 @@ impl DataPumpRunner {
     /// Creates a new data pump runner.
     pub(super) fn new(
         file: fs::File,
-        recycled: spsc::Receiver<DataBlock>,
-        outbound: spsc::Sender<DataBlock>,
+        recycled: spsc::Consumer<DataBlock, CHANNEL_SIZE>,
+        outbound: spsc::Producer<DataBlock, CHANNEL_SIZE>,
         num_runners: usize,
         current_offset: usize,
         block_size: usize,
@@ -54,7 +55,7 @@ impl DataPumpRunner {
             libc::fcntl(fd, libc::F_NOCACHE, 1);
         }
         loop {
-            match self.recycled.recv() {
+            match self.recycled.try_read() {
                 Some(mut block) => {
                     let slice = block.as_mut_slice();
                     let len = self
@@ -63,7 +64,7 @@ impl DataPumpRunner {
                         .expect("Failed to read block");
                     block.set_len(len);
                     self.current_offset += self.block_size * self.num_runners;
-                    self.outbound.send(block).expect("Failed to send block");
+                    self.outbound.write(block);
                     if len != self.block_size {
                         break;
                     }

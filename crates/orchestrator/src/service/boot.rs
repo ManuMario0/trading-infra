@@ -54,7 +54,6 @@ impl ServiceInfo {
 
         // Inject ports
         for (i, port_def) in manifest.blueprint.all_ports().enumerate() {
-            let env_name = format!("{}_{}", service::env::IPC_INPUT, port_def.name());
             command.env(port_def.name(), ports[i].to_string());
         }
 

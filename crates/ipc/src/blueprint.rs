@@ -35,10 +35,6 @@ pub struct PortDefinition {
     pub kind: SocketKind,
     /// Whether we listen (Bind) or initiate (Connect).
     pub role: SocketRole,
-    /// SPSC ring-buffer capacity (rounded up to next power-of-two by the
-    /// allocator).  Controls how many serialized messages can be buffered
-    /// between the user thread and the network thread.
-    pub channel_capacity: usize,
 }
 
 impl PortDefinition {
@@ -47,7 +43,6 @@ impl PortDefinition {
         data_type: String,
         kind: SocketKind,
         role: SocketRole,
-        channel_capacity: usize,
     ) -> PortDefinition {
         assert!(
             name.chars().all(|c| c.is_ascii_uppercase() || c == '_'),
@@ -59,7 +54,6 @@ impl PortDefinition {
             data_type,
             kind,
             role,
-            channel_capacity,
         }
     }
 

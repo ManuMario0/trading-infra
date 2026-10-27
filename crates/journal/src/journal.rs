@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
+use cachec::channel::mpsc;
 use mio::Waker;
-use sync::mpsc;
 use trading_sdk::identity::ServiceId;
 use trading_sdk::journal::lineage::LineageId;
 
@@ -11,10 +11,11 @@ use crate::entry::{JournalEntry, JournalEvent, LogLevel, ServiceKind, ThreadKind
 use crate::lineage::LineageIdGenerator;
 
 pub(crate) const MAX_PRODUCERS: usize = 32;
+pub(crate) const CAPACITY: usize = 1024;
 
 #[derive(Clone)]
 pub struct Journal {
-    mpsc_sender: mpsc::Sender<JournalEntry, MAX_PRODUCERS>,
+    mpsc_sender: mpsc::Producer<JournalEntry, CAPACITY>,
     service_id: ServiceId,
     service_kind: ServiceKind,
     waker: Arc<Waker>,
@@ -24,13 +25,13 @@ pub struct Journal {
 impl Journal {
     /// Initializes the Journaling system, returning the Frontend handler and the Background Runner.
     pub fn init(
-        capacity: usize,
         service_id: ServiceId,
         service_kind: ServiceKind,
         working_dir: std::path::PathBuf,
         log_dir: std::path::PathBuf,
     ) -> (Self, crate::runner::JournalRunner) {
-        let (tx, rx) = mpsc::new::<JournalEntry, MAX_PRODUCERS>(capacity);
+        let channel = mpsc::Channel::new();
+        let (tx, rx) = channel.split();
         let writer = crate::writer::Writer::new(working_dir, log_dir, service_id);
         let (runner, waker) = crate::runner::JournalRunner::new(rx, writer);
 
@@ -47,7 +48,7 @@ impl Journal {
 
     /// Log an event quietly on the background thread.
     pub fn log<Event: JournalEvent>(
-        &self,
+        &mut self,
         thread_kind: ThreadKind,
         parents: Vec<LineageId>,
         log_level: LogLevel,
@@ -64,12 +65,12 @@ impl Journal {
             Box::new(event),
         );
 
-        self.mpsc_sender.send(journal_entry).map_err(|_| {
-            std::io::Error::new(
+        if self.mpsc_sender.try_write(journal_entry).is_some() {
+            return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Failed to send journal entry: Queue Full",
-            )
-        })?;
+            ));
+        }
 
         // Wake the background runner to process the queue
         self.waker.wake()?;

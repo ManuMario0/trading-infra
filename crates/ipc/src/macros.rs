@@ -1,18 +1,18 @@
 #[macro_export]
 macro_rules! make_ipc {
     // Internal helper for building the factory call with one type
-    (@build $transport:ident, $kind:ident, $role:ident, $tx:ty, (), $name:expr, $addr:expr, $cap:expr, $reg:expr, $waker:expr) => {
-        <($crate::factory::$transport, $crate::factory::$kind, $crate::factory::$role) as $crate::factory::SocketFactory<$tx, ()>>::build($name, $addr, $cap, $reg, $waker)
+    (@build $transport:ident, $kind:ident, $role:ident, $tx:ty, (), $name:expr, $addr:expr, $reg:expr, $waker:expr) => {
+        <($crate::factory::$transport, $crate::factory::$kind, $crate::factory::$role) as $crate::factory::SocketFactory<$tx, ()>>::build($name, $addr, $reg, $waker)
     };
 
     // Internal helper for building the factory call with two types
-    (@build $transport:ident, $kind:ident, $role:ident, $tx:ty, ($rx:ty), $name:expr, $addr:expr, $cap:expr, $reg:expr, $waker:expr) => {
-        <($crate::factory::$transport, $crate::factory::$kind, $crate::factory::$role) as $crate::factory::SocketFactory<$tx, $rx>>::build($name, $addr, $cap, $reg, $waker)
+    (@build $transport:ident, $kind:ident, $role:ident, $tx:ty, ($rx:ty), $name:expr, $addr:expr, $reg:expr, $waker:expr) => {
+        <($crate::factory::$transport, $crate::factory::$kind, $crate::factory::$role) as $crate::factory::SocketFactory<$tx, $rx>>::build($name, $addr, $reg, $waker)
     };
 
     (
         $(
-            $name:ident : kind=$kind:ident, role=$role:ident, capacity=$cap:expr, ty=$msg_type:ty, $(rep_ty=$rep_msg_type:ty,)? addr=$addr:expr, transport=$transport:ident
+            $name:ident : kind=$kind:ident, role=$role:ident, ty=$msg_type:ty, $(rep_ty=$rep_msg_type:ty,)? addr=$addr:expr, transport=$transport:ident
         ),* $(,)?
     ) => {{
         use std::sync::Arc;
@@ -45,7 +45,6 @@ macro_rules! make_ipc {
                         ($($rep_msg_type)?),
                         stringify!($name),
                         $addr,
-                        $cap,
                         TokenRegistry::new(_prefix_counter, registry.clone()),
                         waker.clone()
                     );
@@ -64,7 +63,6 @@ macro_rules! make_ipc {
                     stringify!($msg_type).to_string(),
                     SocketKind::$kind,
                     SocketRole::$role,
-                    $cap
                 )
             ),* ],
         };
@@ -80,8 +78,8 @@ mod tests {
     #[test]
     fn test_make_ipc() {
         let (_runner, blueprint, _handle, _socket1, _socket2) = make_ipc!(
-            PORT_A: kind=Aggregate, role=Bind, capacity=1024, ty=u64, addr="127.0.0.1:8001", transport=TCP,
-            PORT_B: kind=Broadcast, role=Connect, capacity=1024, ty=u64, addr="127.0.0.1:8002", transport=TCP,
+            PORT_A: kind=Aggregate, role=Bind, ty=u64, addr="127.0.0.1:8001", transport=TCP,
+            PORT_B: kind=Broadcast, role=Connect, ty=u64, addr="127.0.0.1:8002", transport=TCP,
         );
 
         assert_eq!(blueprint.ports.len(), 2);

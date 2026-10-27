@@ -75,7 +75,7 @@ impl<T: EngineDispatcher> IpcRunner<T> {
     }
 
     /// The blocking event loop.  Returns when shutdown is requested.
-    pub fn run(mut self, journal: Journal) -> io::Result<()> {
+    pub fn run(mut self, mut journal: Journal) -> io::Result<()> {
         // Maximum time to sleep in poll before checking reconnect timers.
         let tick = Duration::from_millis(50);
         let mut last_tick = std::time::Instant::now();
@@ -88,17 +88,17 @@ impl<T: EngineDispatcher> IpcRunner<T> {
                     if SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
                         break 'main_loop;
                     }
-                    self.engines.on_wake(&journal);
+                    self.engines.on_wake(&mut journal);
                 } else {
                     // Zero cost static dispatch directly to the correct engine
-                    self.engines.on_event(event.token(), &journal);
+                    self.engines.on_event(event.token(), &mut journal);
                 }
             }
 
             // Reconnect timers every `tick` duration.
             let now = std::time::Instant::now();
             if now - last_tick >= tick {
-                self.engines.on_tick(&journal);
+                self.engines.on_tick(&mut journal);
                 last_tick = now;
             }
         }

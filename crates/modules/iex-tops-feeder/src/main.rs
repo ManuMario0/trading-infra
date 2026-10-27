@@ -21,7 +21,7 @@ fn main() {
 
     // Setup IPC
     let (runner, blueprint, _stop_handle, mut market_data_socket) = make_ipc!(
-        MARKET_DATA_OUTPUT: kind=Broadcast, role=Bind, capacity=1024, ty=MarketDataBatch, addr=&market_data_output_addr, transport=TCP,
+        MARKET_DATA_OUTPUT: kind=Broadcast, role=Bind, ty=MarketDataBatch, addr=&market_data_output_addr, transport=TCP,
     );
 
     let manifest = Manifest {
@@ -40,8 +40,7 @@ fn main() {
     }
 
     let service_id = ServiceId::new(env::parse_or(env::SERVICE_ID, 0));
-    let (journal, mut journal_runner) = Journal::init(
-        1024,
+    let (mut journal, mut journal_runner) = Journal::init(
         service_id,
         ServiceKind::DataFeed,
         PathBuf::from(env::parse_or(env::WORKING_DIR, "/tmp".to_string())),

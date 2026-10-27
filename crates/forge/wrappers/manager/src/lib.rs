@@ -28,11 +28,11 @@ pub struct ModuleInfo {
     pub description: &'static str,
 }
 
-pub struct JournalWrapper<'a> {
-    journal: &'a Journal,
+pub struct JournalWrapper {
+    journal: Journal,
 }
 
-impl<'a> trading_sdk::journal::journal::Journal for JournalWrapper<'a> {
+impl trading_sdk::journal::journal::Journal for JournalWrapper {
     fn record(
         &mut self,
         parents: Vec<trading_sdk::journal::lineage::LineageId>,
@@ -72,9 +72,9 @@ pub fn run(
     ) = make_ipc!(
         // Here we bind to the allocation input for consistency. However, in theory, only one client connects to it as it does not multiplex.
         // The implementation WILL panic if more than one client sends data to this aggregate port.
-        ALLOCATION_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_input_addr, transport=TCP,
-        MARKET_DATA: kind=Broadcast, role=Connect, capacity=1024, ty=MarketDataBatch, addr=&market_data_addr, transport=TCP,
-        MANAGER_EXECUTION_ENGINE_PIPE: kind=PointToPoint, role=Connect, capacity=1024, ty=Target, rep_ty=Actual, addr=&manager_execution_engine_pipe_addr, transport=TCP,
+        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=&allocation_input_addr, transport=TCP,
+        MARKET_DATA: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr=&market_data_addr, transport=TCP,
+        MANAGER_EXECUTION_ENGINE_PIPE: kind=PointToPoint, role=Connect, ty=Target, rep_ty=Actual, addr=&manager_execution_engine_pipe_addr, transport=TCP,
     );
 
     let manifest = Manifest {
@@ -97,8 +97,7 @@ pub fn run(
     let service_identity = Identity::new(info.name, info.version, service_id);
 
     // Setup the journal.
-    let (journal, mut journal_runner) = Journal::init(
-        1024,
+    let (mut journal, mut journal_runner) = Journal::init(
         service_identity.identifier,
         ServiceKind::Manager,
         PathBuf::from(env::parse_or(env::WORKING_DIR, "/tmp".to_string())),
@@ -124,11 +123,12 @@ pub fn run(
 
     println!("Starting Manager Wrapper...");
 
+    let mut journal_wrapper = JournalWrapper { journal };
+
     loop {
         std::hint::spin_loop();
 
         while let Some(allocation_msg) = allocation_input_socket.try_recv() {
-            let mut journal_wrapper = JournalWrapper { journal: &journal };
             let context = Context {
                 journal: &mut journal_wrapper,
             };
@@ -137,7 +137,6 @@ pub fn run(
             }
         }
         while let Some(market_data_msg) = market_data_socket.try_recv() {
-            let mut journal_wrapper = JournalWrapper { journal: &journal };
             let context = Context {
                 journal: &mut journal_wrapper,
             };
@@ -146,7 +145,6 @@ pub fn run(
             }
         }
         while let Some(actual_msg) = actual_socket.try_recv() {
-            let mut journal_wrapper = JournalWrapper { journal: &journal };
             let context = Context {
                 journal: &mut journal_wrapper,
             };

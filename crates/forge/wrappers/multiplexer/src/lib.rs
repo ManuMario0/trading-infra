@@ -29,11 +29,11 @@ pub struct ModuleInfo {
     pub description: &'static str,
 }
 
-pub struct JournalWrapper<'a> {
-    journal: &'a Journal,
+pub struct JournalWrapper {
+    journal: Journal,
 }
 
-impl<'a> trading_sdk::journal::journal::Journal for JournalWrapper<'a> {
+impl trading_sdk::journal::journal::Journal for JournalWrapper {
     fn record(
         &mut self,
         parents: Vec<trading_sdk::journal::lineage::LineageId>,
@@ -69,9 +69,9 @@ pub fn run(
         mut ledger_update_socket,
         mut execution_result_socket,
     ) = make_ipc!(
-        ALLOCATION_INPUT: kind=Aggregate, role=Bind, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_input_addr, transport=TCP,
-        LEDGER_UPDATE_INPUT: kind=Broadcast, role=Connect, capacity=1024, ty=Envelope<LedgerUpdate>, addr=&ledger_update_input_addr, transport=TCP,
-        ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, capacity=1024, ty=Envelope<Allocation>, addr=&allocation_output_addr, transport=TCP,
+        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=&allocation_input_addr, transport=TCP,
+        LEDGER_UPDATE_INPUT: kind=Broadcast, role=Connect, ty=Envelope<LedgerUpdate>, addr=&ledger_update_input_addr, transport=TCP,
+        ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, ty=Envelope<Allocation>, addr=&allocation_output_addr, transport=TCP,
     );
 
     let manifest = Manifest {
@@ -94,8 +94,7 @@ pub fn run(
     let service_identity = Identity::new(info.name, info.version, service_id);
 
     // Setup the journal.
-    let (journal, mut journal_runner) = Journal::init(
-        1024,
+    let (mut journal, mut journal_runner) = Journal::init(
         service_identity.identifier,
         ServiceKind::Multiplexer,
         PathBuf::from(env::parse_or(env::WORKING_DIR, "/tmp".to_string())),
@@ -121,6 +120,8 @@ pub fn run(
 
     println!("Starting Multiplexer Wrapper...");
 
+    let mut journal_wrapper = JournalWrapper { journal };
+
     loop {
         std::hint::spin_loop();
 
@@ -128,7 +129,7 @@ pub fn run(
             let batch = allocation_msg.payload;
             let source_id = allocation_msg.source;
             let context = Context {
-                journal: &mut JournalWrapper { journal: &journal },
+                journal: &mut journal_wrapper,
             };
             let return_batch = multiplexer
                 .as_mut()
@@ -142,7 +143,7 @@ pub fn run(
             let batch = ledger_update_msg.payload;
             let source_id = ledger_update_msg.source;
             let context = Context {
-                journal: &mut JournalWrapper { journal: &journal },
+                journal: &mut journal_wrapper,
             };
             multiplexer
                 .as_mut()
