@@ -18,7 +18,6 @@ pub struct PortInfo {
     pub transport: String,
     pub kind: String,
     pub role: String,
-    pub capacity: usize,
 }
 
 /// A structured event emitted natively by the IPC network thread.

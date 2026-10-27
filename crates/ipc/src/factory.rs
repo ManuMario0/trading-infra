@@ -52,7 +52,6 @@ pub trait SocketFactory<Tx, Rx = ()> {
     fn build(
         name: &str,
         addr: &str,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle);

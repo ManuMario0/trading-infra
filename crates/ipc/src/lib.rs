@@ -6,14 +6,16 @@
 //! use ipc::make_ipc;
 //! use ipc::factory::{Aggregate, Bind, TCP};
 //!
+//! use journal::journal::Journal;
+//!
 //! // 1. Statically generate the IPC topology via the macro
 //! let (runner, blueprint, handle, data_in_socket) = make_ipc! {
-//!     DATA_IN: kind=Aggregate, role=Bind, capacity=1024, ty=u64, addr="127.0.0.1:9000", transport=TCP
+//!     DATA_IN: kind=Aggregate, role=Bind, ty=u64, addr="127.0.0.1:9000", transport=TCP
 //! };
 //!
-//! // 2. Spawn the network event loop
+//! // 2. Spawn the network event loop (you need to set up a journal first to record events)
 //! std::thread::spawn(move || {
-//!     runner.run().unwrap();
+//!     runner.run(todo!()).unwrap();
 //! });
 //!
 //! // 3. Easily use the typed sockets dynamically

@@ -5,7 +5,7 @@
 use std::fs;
 use std::path;
 
-use sync::spsc;
+use cachec::channel::spsc;
 
 use crate::pump::block::DataBlock;
 use crate::pump::runner::DataPumpRunner;
@@ -14,13 +14,13 @@ use crate::pump::runner::DataPumpRunner;
 pub const NUM_CHUNKS: usize = 4;
 
 /// The size of the channels.
-pub const CHANNEL_SIZE: usize = NUM_CHUNKS + 2;
+pub const CHANNEL_SIZE: usize = (NUM_CHUNKS + 2).next_power_of_two();
 
 pub struct BlockManager {
     /// Inbound SPSC channels
-    inbound: Vec<spsc::Receiver<DataBlock>>,
+    inbound: Vec<spsc::Consumer<DataBlock, CHANNEL_SIZE>>,
     /// Recycled blocks
-    outbound: Vec<spsc::Sender<DataBlock>>,
+    outbound: Vec<spsc::Producer<DataBlock, CHANNEL_SIZE>>,
     /// Next queue to use
     current_queue: usize,
     /// Current data block
@@ -38,17 +38,17 @@ impl BlockManager {
 
         for i in 0..num_runners {
             // Queue for filled blocks sent to the consumer
-            let (tx_outbound, rx_inbound) = spsc::new(CHANNEL_SIZE);
+            let (tx_outbound, rx_inbound) = spsc::Channel::new().split();
             // Queue for empty blocks sent back to the pump
-            let (tx_recycled_outbound, rx_recycled_inbound) = spsc::new(CHANNEL_SIZE);
+            let (mut tx_recycled_outbound, rx_recycled_inbound) = spsc::Channel::new().split();
 
             // We setup the system to have 4 chunks of memory per
             // runner so they always have work to do.
             for _ in 0..NUM_CHUNKS {
                 let block = DataBlock::new(block_size);
-                tx_recycled_outbound
-                    .send(block)
-                    .expect("Failed to send block");
+                if tx_recycled_outbound.try_write(block).is_some() {
+                    panic!("Failed to send block");
+                }
             }
 
             inbound.push(rx_inbound);
@@ -80,24 +80,14 @@ impl BlockManager {
         match self.flying_block.take() {
             Some(old_block) => {
                 // Recycle old block
-                self.outbound[self.current_queue].send(old_block).unwrap();
+                self.outbound[self.current_queue].write(old_block);
                 // Go for the next queue
                 self.current_queue = (self.current_queue + 1) % self.inbound.len();
-                let mut new_block = None;
-                while new_block.is_none() {
-                    new_block = self.inbound[self.current_queue].recv();
-                    std::hint::spin_loop();
-                }
-                self.flying_block = new_block;
+                self.flying_block = Some(self.inbound[self.current_queue].read());
             }
             None => {
                 // We are just starting, we need to get the first block
-                let mut new_block = None;
-                while new_block.is_none() {
-                    new_block = self.inbound[self.current_queue].recv();
-                    std::hint::spin_loop();
-                }
-                self.flying_block = new_block;
+                self.flying_block = Some(self.inbound[self.current_queue].read());
             }
         }
     }

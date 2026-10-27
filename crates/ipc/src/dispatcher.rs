@@ -4,22 +4,22 @@ use mio::Token;
 use crate::token::{self, LocalIndex};
 
 pub trait NetworkEngine {
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal);
-    fn on_wake(&mut self, journal: &Journal);
-    fn on_tick(&mut self, journal: &Journal);
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal);
+    fn on_wake(&mut self, journal: &mut Journal);
+    fn on_tick(&mut self, journal: &mut Journal);
 }
 
 pub trait EngineDispatcher {
-    fn on_event(&mut self, token: Token, journal: &Journal);
-    fn on_wake(&mut self, journal: &Journal);
-    fn on_tick(&mut self, journal: &Journal);
+    fn on_event(&mut self, token: Token, journal: &mut Journal);
+    fn on_wake(&mut self, journal: &mut Journal);
+    fn on_tick(&mut self, journal: &mut Journal);
 }
 
 macro_rules! impl_engine_dispatcher {
     ( $($idx:tt => $name:ident),+ ) => {
         impl<$($name: NetworkEngine),+> EngineDispatcher for ($($name,)+) {
             #[inline(always)]
-            fn on_event(&mut self, token: Token, journal: &Journal) {
+            fn on_event(&mut self, token: Token, journal: &mut Journal) {
                 let prefix = token::prefix(token);
                 let local_index = token::local_index(token);
                 match prefix {
@@ -29,12 +29,12 @@ macro_rules! impl_engine_dispatcher {
             }
 
             #[inline(always)]
-            fn on_tick(&mut self, journal: &Journal) {
+            fn on_tick(&mut self, journal: &mut Journal) {
                 $( self.$idx.on_tick(journal); )+
             }
 
             #[inline(always)]
-            fn on_wake(&mut self, journal: &Journal) {
+            fn on_wake(&mut self, journal: &mut Journal) {
                 $( self.$idx.on_wake(journal); )+
             }
         }

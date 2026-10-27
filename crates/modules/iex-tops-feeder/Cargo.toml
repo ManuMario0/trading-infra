@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sync = { path = "../../sync" }
+cachec = "0.1.1"
 memmap2 = "0.9"
 libc = "0.2"
 trading-sdk = { git = "ssh://git@github.com/ManuMario0/trading-sdk.git", branch = "main" }

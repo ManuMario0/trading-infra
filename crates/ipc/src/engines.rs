@@ -5,19 +5,20 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use cachec::channel::spsc;
 use journal::entry::{LogLevel, ThreadKind};
 use journal::journal::Journal;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Interest, Waker};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sync::spsc;
 
 use crate::backoff::BackoffTimer;
 use crate::dispatcher::NetworkEngine;
 use crate::event::{NetworkEvent, NetworkEventKind, PortInfo};
 use crate::factory::{Aggregate, Bind, Broadcast, Connect, PointToPoint, SocketFactory, TCP};
 use crate::framing::{FrameReader, FrameWriter};
+use crate::socket::CHANNEL_SIZE;
 use crate::socket::{RecvSocket, SendSocket};
 use crate::token::{LocalIndex, TokenRegistry};
 
@@ -31,7 +32,7 @@ pub(crate) fn set_nodelay(stream: &TcpStream) -> io::Result<()> {
 
 /// Helper to fire a network event to the journal with minimal boilerplate.
 #[inline(always)]
-fn log_event(journal: &Journal, port_info: &PortInfo, level: LogLevel, kind: NetworkEventKind) {
+fn log_event(journal: &mut Journal, port_info: &PortInfo, level: LogLevel, kind: NetworkEventKind) {
     let event = NetworkEvent {
         port_info: port_info.clone(),
         kind,
@@ -47,7 +48,7 @@ pub struct TcpBroadcastConnectEngine<Msg> {
     port_info: PortInfo,
 
     addr: SocketAddr,
-    queue: spsc::Sender<Msg>,
+    queue: spsc::Producer<Msg, CHANNEL_SIZE>,
     registry: TokenRegistry,
 
     stream: Option<TcpStream>,
@@ -62,10 +63,9 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     fn new(
         port_info: PortInfo,
         addr: SocketAddr,
-        capacity: usize,
         registry: TokenRegistry,
     ) -> (Self, RecvSocket<Msg>) {
-        let (tx, rx) = spsc::new(capacity);
+        let (tx, rx) = spsc::Channel::new().split();
 
         let engine = Self {
             port_info,
@@ -83,7 +83,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     }
 
     /// Tries to establish (or re-establish) the connection on a regular interval.
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         if self.stream.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
             log_event(
                 journal,
@@ -111,24 +111,6 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
             }
         }
 
-        // Channel pressure telemetry
-        if self.queue.available() * 4 < self.queue.capacity() {
-            log_event(
-                journal,
-                &self.port_info,
-                LogLevel::Warn,
-                NetworkEventKind::ChannelCapacity75,
-            );
-        }
-        if self.queue.available() * 2 < self.queue.capacity() {
-            log_event(
-                journal,
-                &self.port_info,
-                LogLevel::Warn,
-                NetworkEventKind::ChannelCapacity50,
-            );
-        }
-
         // Timeout detection
         if self.backoff.is_maxed() {
             log_event(
@@ -141,7 +123,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
             if local_index.0 == 0 {
                 if !self.is_established {
@@ -167,7 +149,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
                             for raw_msg in messages {
                                 // Deserialize the raw framing buffer directly to the typed Struct
                                 if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
-                                    if self.queue.send(msg).is_err() {
+                                    if self.queue.try_write(msg).is_some() {
                                         log_event(
                                             journal,
                                             &self.port_info,
@@ -223,7 +205,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     }
 
     #[inline(always)]
-    fn on_wake(&mut self, _journal: &Journal) {
+    fn on_wake(&mut self, _journal: &mut Journal) {
         // do nothing, we are not listening to an SPSC channel
     }
 }
@@ -237,7 +219,6 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Broadcast, Connect)
     fn build(
         name: &str,
         addr: &str,
-        capacity: usize,
         registry: TokenRegistry,
         _waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
@@ -248,22 +229,21 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Broadcast, Connect)
             transport: "TCP".to_string(),
             kind: "Broadcast".to_string(),
             role: "Connect".to_string(),
-            capacity,
         };
-        TcpBroadcastConnectEngine::new(port_info, parsed_addr, capacity, registry)
+        TcpBroadcastConnectEngine::new(port_info, parsed_addr, registry)
     }
 }
 
 impl<Msg: DeserializeOwned> NetworkEngine for TcpBroadcastConnectEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         self.on_tick(journal);
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         self.on_wake(journal);
     }
 }
@@ -276,7 +256,7 @@ pub struct TcpAggregateConnectEngine<Msg> {
     port_info: PortInfo,
 
     addr: SocketAddr,
-    queue: spsc::Receiver<Msg>,
+    queue: spsc::Consumer<Msg, CHANNEL_SIZE>,
     registry: TokenRegistry,
 
     stream: Option<TcpStream>,
@@ -291,11 +271,10 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     fn new(
         port_info: PortInfo,
         addr: SocketAddr,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self, SendSocket<Msg>) {
-        let (tx, rx) = spsc::new(capacity);
+        let (tx, rx) = spsc::Channel::new().split();
 
         let engine = Self {
             port_info,
@@ -313,7 +292,7 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     }
 
     /// Tries to establish (or re-establish) the connection on a regular interval.
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         if self.stream.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
             log_event(
                 journal,
@@ -356,7 +335,7 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
             match local_index.0 {
                 1 => {
@@ -427,9 +406,9 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
 
     #[inline(always)]
     /// Triggered when the waker is called
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
-            while let Some(msg) = self.queue.recv() {
+            while let Some(msg) = self.queue.try_read() {
                 self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
                 match self.writer.try_flush(stream) {
                     Ok(_) => {}
@@ -464,7 +443,6 @@ impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Aggregate, Connect) {
     fn build(
         name: &str,
         addr: &str,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
@@ -475,22 +453,21 @@ impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Aggregate, Connect) {
             transport: "TCP".to_string(),
             kind: "Aggregate".to_string(),
             role: "Connect".to_string(),
-            capacity,
         };
-        TcpAggregateConnectEngine::new(port_info, parsed_addr, capacity, registry, waker)
+        TcpAggregateConnectEngine::new(port_info, parsed_addr, registry, waker)
     }
 }
 
 impl<Msg: Serialize> NetworkEngine for TcpAggregateConnectEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         self.on_tick(journal);
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         self.on_wake(journal);
     }
 }
@@ -513,7 +490,7 @@ pub struct TcpBroadcastBindEngine<Msg> {
     port_info: PortInfo,
 
     addr: SocketAddr,
-    queue: spsc::Receiver<Msg>,
+    queue: spsc::Consumer<Msg, CHANNEL_SIZE>,
     registry: TokenRegistry,
 
     listener: Option<TcpListener>,
@@ -534,11 +511,10 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
     fn new(
         port_info: PortInfo,
         addr: SocketAddr,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self, SendSocket<Msg>) {
-        let (tx, rx) = spsc::new(capacity);
+        let (tx, rx) = spsc::Channel::new().split();
 
         let engine = Self {
             port_info,
@@ -555,7 +531,7 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
     }
 
     /// Tries to establish (or re-establish) the bind on a regular interval.
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         if self.listener.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
             log_event(
                 journal,
@@ -599,7 +575,7 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(listener) = &mut self.listener {
             match local_index.0 {
                 LISTENER_INDEX => match listener.accept() {
@@ -672,10 +648,9 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
     }
 
     #[inline(always)]
-    fn on_wake(&mut self, journal: &Journal) {
-        let budget = self.queue.capacity();
-        for _ in 0..budget {
-            if let Some(msg) = self.queue.recv() {
+    fn on_wake(&mut self, journal: &mut Journal) {
+        for _ in 0..CHANNEL_SIZE {
+            if let Some(msg) = self.queue.try_read() {
                 let serialized = postcard::to_allocvec(&msg).unwrap();
                 for client_opt in self.clients.iter_mut() {
                     let mut disconnect = false;
@@ -720,7 +695,6 @@ impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Broadcast, Bind) {
     fn build(
         name: &str,
         addr: &str,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
@@ -731,22 +705,21 @@ impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Broadcast, Bind) {
             transport: "TCP".to_string(),
             kind: "Broadcast".to_string(),
             role: "Bind".to_string(),
-            capacity,
         };
-        TcpBroadcastBindEngine::new(port_info, parsed_addr, capacity, registry, waker)
+        TcpBroadcastBindEngine::new(port_info, parsed_addr, registry, waker)
     }
 }
 
 impl<Msg: Serialize> NetworkEngine for TcpBroadcastBindEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         self.on_tick(journal);
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         self.on_wake(journal);
     }
 }
@@ -759,7 +732,7 @@ pub struct TcpAggregateBindEngine<Msg> {
     port_info: PortInfo,
 
     addr: SocketAddr,
-    queue: spsc::Sender<Msg>,
+    queue: spsc::Producer<Msg, CHANNEL_SIZE>,
     registry: TokenRegistry,
 
     listener: Option<TcpListener>,
@@ -780,10 +753,9 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
     fn new(
         port_info: PortInfo,
         addr: SocketAddr,
-        capacity: usize,
         registry: TokenRegistry,
     ) -> (Self, RecvSocket<Msg>) {
-        let (tx, rx) = spsc::new(capacity);
+        let (tx, rx) = spsc::Channel::new().split();
 
         let engine = Self {
             port_info,
@@ -800,7 +772,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
     }
 
     /// Tries to establish (or re-establish) the bind on a regular interval.
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         if self.listener.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
             log_event(
                 journal,
@@ -832,24 +804,6 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
             }
         }
 
-        // Channel pressure telemetry
-        if self.queue.available() * 4 < self.queue.capacity() {
-            log_event(
-                journal,
-                &self.port_info,
-                LogLevel::Warn,
-                NetworkEventKind::ChannelCapacity75,
-            );
-        }
-        if self.queue.available() * 2 < self.queue.capacity() {
-            log_event(
-                journal,
-                &self.port_info,
-                LogLevel::Warn,
-                NetworkEventKind::ChannelCapacity50,
-            );
-        }
-
         // Timeout detection
         if self.backoff.is_maxed() {
             log_event(
@@ -862,7 +816,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(listener) = &mut self.listener {
             match local_index.0 {
                 LISTENER_INDEX => match listener.accept() {
@@ -911,7 +865,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                                 Ok(messages) => {
                                     for raw_msg in messages {
                                         if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
-                                            if self.queue.send(msg).is_err() {
+                                            if self.queue.try_write(msg).is_some() {
                                                 log_event(
                                                     journal,
                                                     &self.port_info,
@@ -952,7 +906,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
         }
     }
 
-    fn on_wake(&mut self, _journal: &Journal) {}
+    fn on_wake(&mut self, _journal: &mut Journal) {}
 }
 
 // ── Factory Implementation ──────────────────────────────────────────────────
@@ -964,7 +918,6 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Aggregate, Bind) {
     fn build(
         name: &str,
         addr: &str,
-        capacity: usize,
         registry: TokenRegistry,
         _waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
@@ -975,22 +928,21 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Aggregate, Bind) {
             transport: "TCP".to_string(),
             kind: "Aggregate".to_string(),
             role: "Bind".to_string(),
-            capacity,
         };
-        TcpAggregateBindEngine::new(port_info, parsed_addr, capacity, registry)
+        TcpAggregateBindEngine::new(port_info, parsed_addr, registry)
     }
 }
 
 impl<Msg: DeserializeOwned> NetworkEngine for TcpAggregateBindEngine<Msg> {
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         self.on_tick(journal);
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         self.on_wake(journal);
     }
 }
@@ -1003,8 +955,8 @@ pub struct TcpPointToPointBindEngine<Msg, RepMsg> {
     port_info: PortInfo,
 
     addr: SocketAddr,
-    recv_queue: spsc::Sender<RepMsg>,
-    send_queue: spsc::Receiver<Msg>,
+    recv_queue: spsc::Producer<RepMsg, CHANNEL_SIZE>,
+    send_queue: spsc::Consumer<Msg, CHANNEL_SIZE>,
     registry: TokenRegistry,
 
     listener: Option<TcpListener>,
@@ -1028,12 +980,11 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
     fn new(
         port_info: PortInfo,
         addr: SocketAddr,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self, (RecvSocket<RepMsg>, SendSocket<Msg>)) {
-        let (recv_tx, recv_rx) = spsc::new(capacity);
-        let (send_tx, send_rx) = spsc::new(capacity);
+        let (recv_tx, recv_rx) = spsc::Channel::new().split();
+        let (send_tx, send_rx) = spsc::Channel::new().split();
 
         let engine = Self {
             port_info,
@@ -1056,7 +1007,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
     }
 
     /// Tries to establish (or re-establish) the bind on a regular interval.
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         if self.listener.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
             log_event(
                 journal,
@@ -1100,7 +1051,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
     }
 
     /// Handles readable events fired by Mio on this port's specific token.
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(listener) = &mut self.listener {
             match local_index.0 {
                 POINT_TO_POINT_LISTENER_INDEX => match listener.accept() {
@@ -1165,7 +1116,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
                         Ok(messages) => {
                             for raw_msg in messages {
                                 if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg) {
-                                    if self.recv_queue.send(msg).is_err() {
+                                    if self.recv_queue.try_write(msg).is_some() {
                                         log_event(
                                             journal,
                                             &self.port_info,
@@ -1200,10 +1151,10 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
         }
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         let mut disconnected = false;
         if let Some(client) = &mut self.client {
-            while let Some(msg) = self.send_queue.recv() {
+            while let Some(msg) = self.send_queue.try_read() {
                 client.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
                 match client.writer.try_flush(&mut client.stream) {
                     Ok(true) => continue,
@@ -1241,7 +1192,6 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
     fn build(
         name: &str,
         addr: &str,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
@@ -1252,24 +1202,23 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
             transport: "TCP".to_string(),
             kind: "PointToPoint".to_string(),
             role: "Bind".to_string(),
-            capacity,
         };
-        TcpPointToPointBindEngine::new(port_info, parsed_addr, capacity, registry, waker)
+        TcpPointToPointBindEngine::new(port_info, parsed_addr, registry, waker)
     }
 }
 
 impl<Msg: Serialize, RepMsg: DeserializeOwned> NetworkEngine
     for TcpPointToPointBindEngine<Msg, RepMsg>
 {
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         self.on_tick(journal);
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         self.on_wake(journal);
     }
 }
@@ -1282,8 +1231,8 @@ pub struct TcpPointToPointConnectEngine<Msg, RepMsg> {
     port_info: PortInfo,
 
     addr: SocketAddr,
-    recv_queue: spsc::Sender<RepMsg>,
-    send_queue: spsc::Receiver<Msg>,
+    recv_queue: spsc::Producer<RepMsg, CHANNEL_SIZE>,
+    send_queue: spsc::Consumer<Msg, CHANNEL_SIZE>,
     registry: TokenRegistry,
 
     stream: Option<TcpStream>,
@@ -1301,12 +1250,11 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
     fn new(
         port_info: PortInfo,
         addr: SocketAddr,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self, (RecvSocket<RepMsg>, SendSocket<Msg>)) {
-        let (recv_tx, recv_rx) = spsc::new(capacity);
-        let (send_tx, send_rx) = spsc::new(capacity);
+        let (recv_tx, recv_rx) = spsc::Channel::new().split();
+        let (send_tx, send_rx) = spsc::Channel::new().split();
 
         let engine = Self {
             port_info,
@@ -1331,7 +1279,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
     }
 
     /// Tries to establish (or re-establish) the connection on a regular interval.
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         if self.stream.is_none() && self.backoff.can_retry(std::time::Instant::now()) {
             log_event(
                 journal,
@@ -1374,7 +1322,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
     }
 
     /// Handles readable/writable events fired by Mio on this port's specific tokens.
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
             match local_index.0 {
                 POINT_TO_POINT_CONNECT_WRITABLE_INDEX => {
@@ -1420,7 +1368,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
                     Ok(messages) => {
                         for raw_msg in messages {
                             if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg) {
-                                if self.recv_queue.send(msg).is_err() {
+                                if self.recv_queue.try_write(msg).is_some() {
                                     log_event(
                                         journal,
                                         &self.port_info,
@@ -1475,10 +1423,10 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
         }
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         let mut disconnected = false;
         if let Some(stream) = &mut self.stream {
-            while let Some(msg) = self.send_queue.recv() {
+            while let Some(msg) = self.send_queue.try_read() {
                 self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
                 match self.writer.try_flush(stream) {
                     Ok(true) => continue,
@@ -1519,7 +1467,6 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
     fn build(
         name: &str,
         addr: &str,
-        capacity: usize,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
@@ -1530,24 +1477,23 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
             transport: "TCP".to_string(),
             kind: "PointToPoint".to_string(),
             role: "Connect".to_string(),
-            capacity,
         };
-        TcpPointToPointConnectEngine::new(port_info, parsed_addr, capacity, registry, waker)
+        TcpPointToPointConnectEngine::new(port_info, parsed_addr, registry, waker)
     }
 }
 
 impl<Msg: Serialize, RepMsg: DeserializeOwned> NetworkEngine
     for TcpPointToPointConnectEngine<Msg, RepMsg>
 {
-    fn on_event(&mut self, local_index: LocalIndex, journal: &Journal) {
+    fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         self.on_event(local_index, journal);
     }
 
-    fn on_tick(&mut self, journal: &Journal) {
+    fn on_tick(&mut self, journal: &mut Journal) {
         self.on_tick(journal);
     }
 
-    fn on_wake(&mut self, journal: &Journal) {
+    fn on_wake(&mut self, journal: &mut Journal) {
         self.on_wake(journal);
     }
 }

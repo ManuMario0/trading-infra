@@ -32,9 +32,9 @@ fn main() {
         ledger_update_socket,
         execution_result_socket,
     ) = make_ipc!(
-        MARKET_DATA_PIPE: kind=Broadcast, role=Connect, capacity=1024, ty=MarketDataBatch, addr="127.0.0.1:8001", transport=TCP,
-        LEDGER_UPDATE_PIPE: kind=Broadcast, role=Bind, capacity=1024, ty=LedgerUpdate, addr="127.0.0.1:8002", transport=TCP,
-        EXECUTION_RESULT_PIPE: kind=Broadcast, role=Connect, capacity=1024, ty=ExecutionResult, addr="127.0.0.1:8003", transport=TCP,
+        MARKET_DATA_PIPE: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr="127.0.0.1:8001", transport=TCP,
+        LEDGER_UPDATE_PIPE: kind=Broadcast, role=Bind, ty=LedgerUpdate, addr="127.0.0.1:8002", transport=TCP,
+        EXECUTION_RESULT_PIPE: kind=Broadcast, role=Connect, ty=ExecutionResult, addr="127.0.0.1:8003", transport=TCP,
     );
 
     let manifest = Manifest {
@@ -62,8 +62,7 @@ fn main() {
     // Startup journal thread
     let working_dir = env::parse_or(env::WORKING_DIR, "/tmp".to_string());
     let log_dir = env::parse_or(env::LOGGING_DIR, "/tmp".to_string());
-    let (journal, mut journal_runner) = Journal::init(
-        1024,
+    let (mut journal, mut journal_runner) = Journal::init(
         identity.identifier,
         ServiceKind::Ledger,
         PathBuf::from(working_dir),
