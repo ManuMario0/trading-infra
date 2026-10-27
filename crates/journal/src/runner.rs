@@ -2,9 +2,8 @@
 
 use std::sync::Arc;
 
-use mio::{Events, Poll, Token, Waker};
-
 use cachec::channel::mpsc;
+use mio::{Events, Poll, Token, Waker};
 
 use crate::entry::JournalEntry;
 use crate::journal::{CAPACITY, MAX_PRODUCERS};

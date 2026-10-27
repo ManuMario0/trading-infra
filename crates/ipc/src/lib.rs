@@ -6,8 +6,6 @@
 //! use ipc::make_ipc;
 //! use ipc::factory::{Aggregate, Bind, TCP};
 //!
-//! use journal::journal::Journal;
-//!
 //! // 1. Statically generate the IPC topology via the macro
 //! let (runner, blueprint, handle, data_in_socket) = make_ipc! {
 //!     DATA_IN: kind=Aggregate, role=Bind, ty=u64, addr="127.0.0.1:9000", transport=TCP
