@@ -21,7 +21,7 @@ impl ServiceIdAllocator {
         }
     }
 
-    pub fn next(&mut self) -> ServiceId {
+    pub fn generate_id(&mut self) -> ServiceId {
         let id = self.next_id;
         self.next_id += 1;
         ServiceId::new(self.node_id | id)

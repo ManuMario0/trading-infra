@@ -82,8 +82,8 @@ pub fn strip_transport_slice(packet_data: &[u8]) -> Option<&[u8]> {
     // Let's try to make everything much faster, and see if it works
     // We trust the fact that the underlying protocol is full IPv4 and with the exact expected options.
     if packet_data.len() < ETHERNET_HEADER_LEN + IPV4_MIN_HEADER_LEN + UDP_HEADER_LEN {
-        return None;
+        None
     } else {
-        return Some(&packet_data[ETHERNET_HEADER_LEN + IPV4_MIN_HEADER_LEN + UDP_HEADER_LEN..]);
+        Some(&packet_data[ETHERNET_HEADER_LEN + IPV4_MIN_HEADER_LEN + UDP_HEADER_LEN..])
     }
 }

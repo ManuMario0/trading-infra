@@ -219,8 +219,7 @@ impl FileCursor {
         }
         if offset + len <= self.current_data_block_end {
             return Some(
-                &self
-                    .block_manager
+                self.block_manager
                     .get_slice(offset - self.current_data_block_offset, len),
             );
         }

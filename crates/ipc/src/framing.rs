@@ -125,20 +125,12 @@ impl FrameReader {
 ///
 /// Enqueue serialised messages via `enqueue`; call `try_flush` whenever
 /// the event loop signals that the stream is writable.
+#[derive(Default)]
 pub struct FrameWriter {
     /// FIFO of fully-framed on-wire messages (length prefix + body).
     queue: VecDeque<Vec<u8>>,
     /// Bytes of `queue.front()` already written.
     write_cursor: usize,
-}
-
-impl Default for FrameWriter {
-    fn default() -> Self {
-        Self {
-            queue: VecDeque::new(),
-            write_cursor: 0,
-        }
-    }
 }
 
 impl FrameWriter {

@@ -66,8 +66,7 @@ impl Journal {
         );
 
         if self.mpsc_sender.try_write(journal_entry).is_some() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 "Failed to send journal entry: Queue Full",
             ));
         }

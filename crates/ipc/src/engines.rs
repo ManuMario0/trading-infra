@@ -148,15 +148,15 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
                         Ok(messages) => {
                             for raw_msg in messages {
                                 // Deserialize the raw framing buffer directly to the typed Struct
-                                if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
-                                    if self.queue.try_write(msg).is_some() {
-                                        log_event(
-                                            journal,
-                                            &self.port_info,
-                                            LogLevel::Warn,
-                                            NetworkEventKind::ChannelFull,
-                                        );
-                                    }
+                                if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg)
+                                    && self.queue.try_write(msg).is_some()
+                                {
+                                    log_event(
+                                        journal,
+                                        &self.port_info,
+                                        LogLevel::Warn,
+                                        NetworkEventKind::ChannelFull,
+                                    );
                                 }
                             }
                         }
@@ -864,15 +864,15 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                             match client.reader.try_read(&mut client.stream) {
                                 Ok(messages) => {
                                     for raw_msg in messages {
-                                        if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg) {
-                                            if self.queue.try_write(msg).is_some() {
-                                                log_event(
-                                                    journal,
-                                                    &self.port_info,
-                                                    LogLevel::Warn,
-                                                    NetworkEventKind::ChannelFull,
-                                                );
-                                            }
+                                        if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg)
+                                            && self.queue.try_write(msg).is_some()
+                                        {
+                                            log_event(
+                                                journal,
+                                                &self.port_info,
+                                                LogLevel::Warn,
+                                                NetworkEventKind::ChannelFull,
+                                            );
                                         }
                                     }
                                 }
@@ -1115,15 +1115,15 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
                     match client.reader.try_read(&mut client.stream) {
                         Ok(messages) => {
                             for raw_msg in messages {
-                                if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg) {
-                                    if self.recv_queue.try_write(msg).is_some() {
-                                        log_event(
-                                            journal,
-                                            &self.port_info,
-                                            LogLevel::Warn,
-                                            NetworkEventKind::ChannelFull,
-                                        );
-                                    }
+                                if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg)
+                                    && self.recv_queue.try_write(msg).is_some()
+                                {
+                                    log_event(
+                                        journal,
+                                        &self.port_info,
+                                        LogLevel::Warn,
+                                        NetworkEventKind::ChannelFull,
+                                    );
                                 }
                             }
                         }
@@ -1367,15 +1367,15 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
                 POINT_TO_POINT_CONNECT_READABLE_INDEX => match self.reader.try_read(stream) {
                     Ok(messages) => {
                         for raw_msg in messages {
-                            if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg) {
-                                if self.recv_queue.try_write(msg).is_some() {
-                                    log_event(
-                                        journal,
-                                        &self.port_info,
-                                        LogLevel::Warn,
-                                        NetworkEventKind::ChannelFull,
-                                    );
-                                }
+                            if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg)
+                                && self.recv_queue.try_write(msg).is_some()
+                            {
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Warn,
+                                    NetworkEventKind::ChannelFull,
+                                );
                             }
                         }
                     }

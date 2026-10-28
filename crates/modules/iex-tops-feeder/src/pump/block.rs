@@ -44,6 +44,15 @@ impl DataBlock {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Return a pointer to the data stored at `offset`.
+    ///
+    /// # Safety
+    ///
+    /// `offset` should be smaller than [self.len()](Self::len).
     pub unsafe fn get_unchecked(&self, offset: usize) -> *mut u8 {
         unsafe { self.ptr.add(offset) }
     }

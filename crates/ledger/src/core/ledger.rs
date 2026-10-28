@@ -10,7 +10,7 @@ use crate::model::transaction::Transaction;
 
 /// The core double-entry engine.
 /// Purely focused on mathematical integrity and hierarchical tracking.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Ledger {
     pub accounts: Vec<Account>,
     pub history: Vec<Transaction>,
@@ -90,6 +90,8 @@ impl Ledger {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use crate::model::{split::Split, transaction::TransactionBuilder};
 
     use super::*;
@@ -97,7 +99,7 @@ mod tests {
     #[test]
     fn test_add_account() {
         let mut ledger = Ledger::new();
-        let account_id = ledger.add_account(AccountName::from_str("Assets:Cash"), 0);
+        let account_id = ledger.add_account(AccountName::from_str("Assets:Cash").unwrap(), 0);
         assert_eq!(account_id, AccountId(0));
         assert_eq!(ledger.accounts.len(), 1);
         assert_eq!(ledger.accounts[0].balance, Balance::ZERO);
@@ -106,7 +108,7 @@ mod tests {
     #[test]
     fn test_record_balanced_transaction() {
         let mut ledger = Ledger::new();
-        let account_id = ledger.add_account(AccountName::from_str("Assets:Cash"), 0);
+        let account_id = ledger.add_account(AccountName::from_str("Assets:Cash").unwrap(), 0);
         let transaction = TransactionBuilder::new(0, 0, "Test".to_string())
             .add_split(Split {
                 account: account_id,
@@ -125,7 +127,7 @@ mod tests {
     #[test]
     fn test_record_unbalanced_transaction() {
         let mut ledger = Ledger::new();
-        let account_id = ledger.add_account(AccountName::from_str("Assets:Cash"), 0);
+        let account_id = ledger.add_account(AccountName::from_str("Assets:Cash").unwrap(), 0);
         let transaction = TransactionBuilder::new(0, 0, "Test".to_string())
             .add_split(Split {
                 account: account_id,

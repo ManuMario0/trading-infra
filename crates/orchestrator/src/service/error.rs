@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// the specific failure mode.
 ///
 /// For now, the structure is extremely inefficient, should be improved to avoid regular cloning in the future.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Context {
     context: Vec<String>,
 }

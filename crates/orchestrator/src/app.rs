@@ -46,7 +46,7 @@ impl App {
         // The orchestrator service is always the first service to start, so it has the identifier 0.
         let service_id_namespace = node_id << 20;
         let mut service_id_allocator = ServiceIdAllocator::new(service_id_namespace);
-        let orchestrator_service_id = service_id_allocator.next();
+        let orchestrator_service_id = service_id_allocator.generate_id();
 
         // Make identity for the orchestrator.
         let orchestrator_identity = make_identity!(orchestrator_service_id);
@@ -65,7 +65,7 @@ impl App {
             service::env::LOGGING_DIR,
             PathBuf::from(working_dir.clone()).join("logs"),
         );
-        std::fs::create_dir_all(&logging_dir).unwrap_or_else(|_| ());
+        std::fs::create_dir_all(&logging_dir).unwrap_or(());
 
         let (mut journal, mut journal_runner) = Journal::init(
             orchestrator_identity.identifier,
@@ -86,7 +86,7 @@ impl App {
             .unwrap();
 
         let service_working_dir = PathBuf::from(working_dir.clone()).join("services");
-        std::fs::create_dir_all(&service_working_dir).unwrap_or_else(|_| ());
+        std::fs::create_dir_all(&service_working_dir).unwrap_or(());
         let service_registry = ServiceRegistry::new(service_working_dir);
 
         Self {

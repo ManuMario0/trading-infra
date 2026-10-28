@@ -6,6 +6,7 @@ use trading_sdk::model::ledger::LedgerUpdate;
 ///
 /// It should receive allocations from multiple strategies and ledger updates,
 /// and output aggregated allocations based on the Kelly Criterion.
+#[derive(Default)]
 pub struct KellyMultiplexer {
     // Current state of the account
     pub ledger: Option<LedgerUpdate>,
@@ -15,18 +16,18 @@ pub struct KellyMultiplexer {
 impl Multiplexist for KellyMultiplexer {
     fn on_allocation(
         &mut self,
-        context: trading_sdk::model::context::Context,
-        source_id: trading_sdk::identity::ServiceId,
-        batch: Allocation,
+        _context: trading_sdk::model::context::Context,
+        _source_id: trading_sdk::identity::ServiceId,
+        _batch: Allocation,
     ) -> Allocation {
         todo!()
     }
 
     fn on_ledger_update(
         &mut self,
-        context: trading_sdk::model::context::Context,
-        source_id: trading_sdk::identity::ServiceId,
-        ledger_update: LedgerUpdate,
+        _context: trading_sdk::model::context::Context,
+        _source_id: trading_sdk::identity::ServiceId,
+        _ledger_update: LedgerUpdate,
     ) {
         todo!()
     }

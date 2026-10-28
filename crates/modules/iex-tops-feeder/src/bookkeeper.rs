@@ -14,6 +14,7 @@ use trading_sdk::{MarketDataBatch, journal::lineage::LineageId};
 use crate::parser::QuoteUpdateMessage;
 
 /// Quite slow: P90 at 50 cycles per messages.
+#[derive(Default)]
 pub struct HashMapBookKeeper {
     quote_map: HashMap<[u8; 8], SimpleQuote>,
 }
@@ -56,9 +57,9 @@ impl Display for HashMapBookKeeper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "HashMapBookKeeper:")?;
         for (symbol, quote) in &self.quote_map {
-            write!(
+            writeln!(
                 f,
-                "\t{}: {} @ {} / {} @ {}\n",
+                "\t{}: {} @ {} / {} @ {}",
                 String::from_utf8_lossy(symbol),
                 quote.bid_size,
                 quote.bid_price,
@@ -71,6 +72,7 @@ impl Display for HashMapBookKeeper {
 }
 
 /// Super slow: P90 at 180 cycles per messages.
+#[derive(Default)]
 pub struct BTreeMapBookKeeper {
     quote_map: BTreeMap<[u8; 8], SimpleQuote>,
 }
@@ -106,9 +108,9 @@ impl Display for BTreeMapBookKeeper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "BTreeMapBookKeeper:")?;
         for (symbol, quote) in &self.quote_map {
-            write!(
+            writeln!(
                 f,
-                "\t{}: {} @ {} / {} @ {}\n",
+                "\t{}: {} @ {} / {} @ {}",
                 String::from_utf8_lossy(symbol),
                 quote.bid_size,
                 quote.bid_price,
@@ -126,6 +128,7 @@ const SOA_CAPACITY: usize = 32768; // Must be a power of 2
 const SOA_MASK: usize = SOA_CAPACITY - 1;
 
 /// Insane perfs: P90 at 30 cycles.
+#[derive(Default)]
 pub struct SoaBookKeeper {
     /// Stores the u64 representation of the 8-byte symbol.
     /// 0 means the slot is empty.
@@ -224,9 +227,9 @@ impl Display for SoaBookKeeper {
             let sym_u64 = self.symbols[idx];
             if sym_u64 != 0 {
                 let symbol_bytes = sym_u64.to_le_bytes();
-                write!(
+                writeln!(
                     f,
-                    "\t{}: {} @ {} / {} @ {}\n",
+                    "\t{}: {} @ {} / {} @ {}",
                     String::from_utf8_lossy(&symbol_bytes),
                     self.bid_size[idx],
                     self.bid_price[idx],

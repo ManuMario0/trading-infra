@@ -5,7 +5,7 @@
 
 use std::ops::RangeInclusive;
 
-use crate::port::port::Port;
+use crate::port::Port;
 
 pub struct Allocator {
     port_range: RangeInclusive<u16>,
