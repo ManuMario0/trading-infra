@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{fmt, str::FromStr};
 use trading_sdk::InstrumentId;
 
 use crate::model::balance::Balance;
@@ -14,17 +14,20 @@ pub struct AccountId(pub usize);
 pub struct AccountName(pub Vec<String>);
 
 impl AccountName {
-    /// Creates an AccountName from a colon-delimited string.
-    pub fn from_str(s: &str) -> Self {
-        Self(s.split(':').map(|p| p.to_string()).collect())
-    }
-
     /// Checks if this account is a child of or equal to another account prefix.
     pub fn starts_with(&self, other: &AccountName) -> bool {
         if other.0.len() > self.0.len() {
             return false;
         }
         self.0.iter().zip(other.0.iter()).all(|(a, b)| a == b)
+    }
+}
+
+impl FromStr for AccountName {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.split(':').map(|p| p.to_string()).collect()))
     }
 }
 

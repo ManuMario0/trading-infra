@@ -177,35 +177,35 @@ impl Parser {
         bookkeeper: &mut SoaBookKeeper,
         probe: &mut LatencyProbe,
     ) {
-        if let Some(iex_payload) = transport::strip_transport_slice(packet_slice) {
-            if iex_payload.len() >= 40 {
-                // IEX-TP header: message_count at offset 14
-                let message_count = u16::from_le_bytes(iex_payload[14..16].try_into().unwrap());
-                let mut msg_pos = 40;
+        if let Some(iex_payload) = transport::strip_transport_slice(packet_slice)
+            && iex_payload.len() >= 40
+        {
+            // IEX-TP header: message_count at offset 14
+            let message_count = u16::from_le_bytes(iex_payload[14..16].try_into().unwrap());
+            let mut msg_pos = 40;
 
-                for _ in 0..message_count {
-                    if msg_pos + 2 > iex_payload.len() {
-                        break;
-                    }
-                    let message_len =
-                        u16::from_le_bytes(iex_payload[msg_pos..msg_pos + 2].try_into().unwrap())
-                            as usize;
-                    probe.mark(message_len as u64);
-                    msg_pos += 2;
-
-                    if msg_pos + message_len > iex_payload.len() {
-                        break;
-                    }
-
-                    // Check message type
-                    let message = &iex_payload[msg_pos..msg_pos + message_len];
-                    if message[0] == b'Q' && message_len == 42 {
-                        let quote = QuoteUpdateMessage::from_bytes(message);
-                        bookkeeper.update_quote(quote);
-                    }
-
-                    msg_pos += message_len;
+            for _ in 0..message_count {
+                if msg_pos + 2 > iex_payload.len() {
+                    break;
                 }
+                let message_len =
+                    u16::from_le_bytes(iex_payload[msg_pos..msg_pos + 2].try_into().unwrap())
+                        as usize;
+                probe.mark(message_len as u64);
+                msg_pos += 2;
+
+                if msg_pos + message_len > iex_payload.len() {
+                    break;
+                }
+
+                // Check message type
+                let message = &iex_payload[msg_pos..msg_pos + message_len];
+                if message[0] == b'Q' && message_len == 42 {
+                    let quote = QuoteUpdateMessage::from_bytes(message);
+                    bookkeeper.update_quote(quote);
+                }
+
+                msg_pos += message_len;
             }
         }
     }

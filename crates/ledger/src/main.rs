@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::thread;
 
 use ipc::make_ipc;
@@ -27,10 +28,10 @@ fn main() {
     let (
         runner,
         blueprint,
-        handle,
-        market_data_socket,
-        ledger_update_socket,
-        execution_result_socket,
+        _handle,
+        _market_data_socket,
+        _ledger_update_socket,
+        _execution_result_socket,
     ) = make_ipc!(
         MARKET_DATA_PIPE: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr="127.0.0.1:8001", transport=TCP,
         LEDGER_UPDATE_PIPE: kind=Broadcast, role=Bind, ty=LedgerUpdate, addr="127.0.0.1:8002", transport=TCP,
@@ -68,12 +69,12 @@ fn main() {
         PathBuf::from(working_dir),
         PathBuf::from(log_dir),
     );
-    let journal_handle = thread::spawn(move || {
+    let _journal_handle = thread::spawn(move || {
         journal_runner.run();
     });
 
     let ipc_journal = journal.clone();
-    let ipc_handle = thread::spawn(move || {
+    let _ipc_handle = thread::spawn(move || {
         runner.run(ipc_journal).unwrap();
     });
 
@@ -82,7 +83,7 @@ fn main() {
         service_type: manifest.service_type,
         kind: ServiceEventKind::Startup,
     };
-    let startup_lineage = journal
+    let _startup_lineage = journal
         .log(ThreadKind::Main, vec![], LogLevel::Info, startup_event)
         .unwrap(); // crash if initial log fails
 
@@ -95,10 +96,10 @@ fn main() {
 
     // Initialize ledger
     let mut ledger = Ledger::new();
-    ledger.add_account(AccountName::from_str("Assets:Cash"), 0);
-    ledger.add_account(AccountName::from_str("Assets:Broker"), 0);
-    ledger.add_account(AccountName::from_str("Liabilities:Broker"), 0);
-    ledger.add_account(AccountName::from_str("Equity:Capital"), 0);
+    ledger.add_account(AccountName::from_str("Assets:Cash").unwrap(), 0);
+    ledger.add_account(AccountName::from_str("Assets:Broker").unwrap(), 0);
+    ledger.add_account(AccountName::from_str("Liabilities:Broker").unwrap(), 0);
+    ledger.add_account(AccountName::from_str("Equity:Capital").unwrap(), 0);
 
     // TODO: Implement service loop
 }

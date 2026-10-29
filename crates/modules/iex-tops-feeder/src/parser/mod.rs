@@ -15,8 +15,10 @@ pub enum Message {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Timestamp(u64);
 
+#[allow(dead_code)]
 pub struct SystemEvent {
     system_event: SystemEventIdentifier, // 1 byte
     timestamp: Timestamp,                // 8 bytes
@@ -32,6 +34,7 @@ pub enum SystemEventIdentifier {
     Other,                     // One always should assume that a wild message appeared in the feed
 }
 
+#[allow(dead_code)]
 pub struct SecurityDirectory {
     flags: u8,            // 1 byte
     timestamp: Timestamp, // 8 bytes
@@ -49,6 +52,7 @@ pub struct SecurityDirectory {
     luld_tier: u8, // 1 byte
 }
 
+#[allow(dead_code)]
 pub struct TradingStatus {
     trading_status: TradingStatusIdentifier, // 1 byte
     timestamp: Timestamp,                    // 8 bytes
@@ -77,6 +81,7 @@ pub enum TradingStatusReason {
     MarketWideCircuitBreakerLevel2, // 'MCB2'
 }
 
+#[allow(dead_code)]
 pub struct RetailLiquidityIndicator {
     retail_liquidity_indicator_identifier: RetailLiquidityIndicatorIdentifier,
     timestamp: Timestamp,
@@ -92,6 +97,7 @@ pub enum RetailLiquidityIndicatorIdentifier {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct QuoteUpdateMessage {
     flags: u8,
     timestamp: Timestamp,
@@ -154,6 +160,7 @@ impl QuoteUpdateMessage {
     }
 }
 
+#[allow(dead_code)]
 pub struct TradeReportMessage {
     sale_condition_flags: u8,
     timestamp: Timestamp,

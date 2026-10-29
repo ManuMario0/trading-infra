@@ -74,7 +74,7 @@ fn main() {
         sleep(Duration::from_micros(1));
         let emit_batch_event = ServiceLifetimeEvent {
             service_type: "data feeder".to_string(),
-            kind: ServiceEventKind::Info(format!("Sending data batch")),
+            kind: ServiceEventKind::Info("Sending data batch".to_string()),
         };
         let emit_lineage = journal
             .log(

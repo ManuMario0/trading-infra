@@ -18,6 +18,7 @@ pub fn get_cycles() -> u64 {
 const BUCKET_SIZE: u64 = 10;
 const BUCKET_COUNT: usize = 2048;
 
+#[derive(Default)]
 pub struct StatsCollector {
     total_messages: u64,
     total_bytes: u64,
@@ -101,6 +102,15 @@ impl<const BUCKET_SIZE: u64, const BUCKET_COUNT: usize> Histogram<BUCKET_SIZE, B
     }
 }
 
+impl<const BUCKET_SIZE: u64, const BUCKET_COUNT: usize> Default
+    for Histogram<BUCKET_SIZE, BUCKET_COUNT>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Default)]
 pub struct LatencyProbe {
     start_cycles: u64,
     message_count: u64,

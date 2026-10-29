@@ -38,11 +38,11 @@ impl ServiceInfo {
 
         // Now bootup the service for real,
         // providing it with logger addr and service id
-        let service_id = service_allocator.next();
+        let service_id = service_allocator.generate_id();
         let mut command = std::process::Command::new(&path);
         command.env(service::env::SERVICE_ID, service_id.get_inner().to_string());
         let working_directory = working_directory.join(service_id.get_inner().to_string());
-        std::fs::create_dir_all(&working_directory).unwrap_or_else(|_| ());
+        std::fs::create_dir_all(&working_directory).unwrap_or(());
         command.env(
             service::env::WORKING_DIR,
             working_directory.to_string_lossy().to_string(),
