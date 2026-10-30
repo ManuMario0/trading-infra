@@ -181,3 +181,144 @@ impl FrameWriter {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Buffer {
+        storage: [u8; 2048],
+        write_head: usize,
+        read_head: usize,
+        max_reads: Vec<usize>,
+        max_writes: Vec<usize>,
+    }
+
+    impl Buffer {
+        fn new(max_reads: Vec<usize>, max_writes: Vec<usize>) -> Self {
+            Self {
+                storage: [0; 2048],
+                write_head: 0,
+                read_head: 0,
+                max_reads,
+                max_writes,
+            }
+        }
+    }
+
+    impl Read for Buffer {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let len = buf
+                .len()
+                .min(self.write_head - self.read_head)
+                .min(self.max_reads.pop().unwrap_or(usize::MAX));
+            if len == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "No more bytes to read",
+                ));
+            }
+            let slice = &mut self.storage[self.read_head..(self.read_head + len)];
+            buf[0..len].copy_from_slice(slice);
+            self.read_head += len;
+            Ok(len)
+        }
+    }
+
+    impl Write for Buffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let len = buf
+                .len()
+                .min(self.storage.len() - self.write_head)
+                .min(self.max_writes.pop().unwrap_or(usize::MAX));
+            if len == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "No more bytes to write",
+                ));
+            }
+            let slice = &mut self.storage[self.write_head..(self.write_head + len)];
+            slice.copy_from_slice(&buf[0..len]);
+            self.write_head += len;
+            Ok(len)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn send_then_recv_full_frame() {
+        let payload = vec![0, 1, 2, 3, 4];
+        let mut buffer = Buffer::new(vec![], vec![]);
+
+        let mut writer = FrameWriter::new();
+        let mut reader = FrameReader::new();
+
+        writer.enqueue(payload.clone());
+
+        let write_result = writer.try_flush(&mut buffer);
+
+        assert!(write_result.is_ok());
+        assert_eq!(write_result.unwrap(), true);
+
+        let read_result = reader.try_read(&mut buffer);
+        assert!(read_result.is_ok());
+
+        assert_eq!(read_result.unwrap(), vec![payload]);
+    }
+
+    #[test]
+    fn partial_flush() {
+        let payload = vec![0, 1, 2, 3, 4];
+        let mut buffer = Buffer::new(vec![], vec![1, 0]);
+
+        let mut writer = FrameWriter::new();
+        let mut reader = FrameReader::new();
+
+        writer.enqueue(payload.clone());
+
+        let write_result = writer.try_flush(&mut buffer);
+
+        assert!(write_result.is_ok());
+        assert_eq!(write_result.unwrap(), false);
+
+        let read_result = reader.try_read(&mut buffer);
+        assert!(read_result.is_ok());
+
+        assert_eq!(read_result.unwrap(), vec![] as Vec<Vec<u8>>);
+
+        let write_result = writer.try_flush(&mut buffer);
+
+        assert!(write_result.is_ok());
+        assert_eq!(write_result.unwrap(), true);
+
+        let read_result = reader.try_read(&mut buffer);
+        assert!(read_result.is_ok());
+
+        assert_eq!(read_result.unwrap(), vec![payload]);
+    }
+
+    #[test]
+    fn multiple_message() {
+        let payload = vec![0, 1, 2, 3, 4];
+        let mut buffer = Buffer::new(vec![], vec![]);
+
+        let mut writer = FrameWriter::new();
+        let mut reader = FrameReader::new();
+
+        writer.enqueue(payload.clone());
+        writer.enqueue(payload.clone());
+
+        let write_result = writer.try_flush(&mut buffer);
+
+        assert!(write_result.is_ok());
+        assert_eq!(write_result.unwrap(), true);
+
+        let read_result = reader.try_read(&mut buffer);
+        assert!(read_result.is_ok());
+
+        assert_eq!(read_result.unwrap(), vec![payload.clone(), payload]);
+    }
+}
