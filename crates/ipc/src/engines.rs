@@ -98,7 +98,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
                     // We register for readable events to receive actual data and detect disconnection.
                     let _ = self.registry.register(
                         &mut stream,
-                        LocalIndex(0),
+                        0.into(),
                         Interest::READABLE | Interest::WRITABLE,
                     );
 
@@ -125,7 +125,7 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     /// Handles readable events fired by Mio on this port's specific token.
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
-            if local_index.0 == 0 {
+            if usize::from(local_index) == 0 {
                 if !self.is_established {
                     match stream.take_error() {
                         Ok(None) => {
@@ -307,11 +307,11 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
                     // We register for writable events to identify when the connection is established.
                     let _ = self
                         .registry
-                        .register(&mut stream, LocalIndex(1), Interest::WRITABLE);
+                        .register(&mut stream, 1.into(), Interest::WRITABLE);
                     // We also register for readable events to identify when the connection is closed.
                     let _ = self
                         .registry
-                        .register(&mut stream, LocalIndex(2), Interest::READABLE);
+                        .register(&mut stream, 2.into(), Interest::READABLE);
 
                     let _ = set_nodelay(&stream);
                     self.stream = Some(stream);
@@ -337,7 +337,7 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     /// Handles readable events fired by Mio on this port's specific token.
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
-            match local_index.0 {
+            match usize::from(local_index) {
                 1 => {
                     if !self.is_established {
                         match stream.take_error() {
@@ -545,7 +545,7 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
                 Ok(mut listener) => {
                     let _ = self.registry.register(
                         &mut listener,
-                        LocalIndex(LISTENER_INDEX),
+                        LISTENER_INDEX.into(),
                         Interest::READABLE,
                     );
                     self.listener = Some(listener);
@@ -577,7 +577,7 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
     /// Handles readable events fired by Mio on this port's specific token.
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(listener) = &mut self.listener {
-            match local_index.0 {
+            match usize::from(local_index) {
                 LISTENER_INDEX => match listener.accept() {
                     Ok((mut stream, addr)) => {
                         let available_slot =
@@ -593,11 +593,9 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
                         }
                         let slot = available_slot.unwrap();
                         let _ = set_nodelay(&stream);
-                        let _ = self.registry.register(
-                            &mut stream,
-                            LocalIndex(slot),
-                            Interest::WRITABLE,
-                        );
+                        let _ =
+                            self.registry
+                                .register(&mut stream, slot.into(), Interest::WRITABLE);
                         log_event(
                             journal,
                             &self.port_info,
@@ -615,7 +613,7 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
                     }
                 },
                 _ => {
-                    let slot = local_index.0;
+                    let slot = usize::from(local_index);
                     if slot < MAX_CLIENTS {
                         let mut disconnect = false;
                         let mut peer_addr = None;
@@ -786,7 +784,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                 Ok(mut listener) => {
                     let _ = self.registry.register(
                         &mut listener,
-                        LocalIndex(LISTENER_INDEX),
+                        LISTENER_INDEX.into(),
                         Interest::READABLE,
                     );
                     self.listener = Some(listener);
@@ -818,7 +816,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
     /// Handles readable events fired by Mio on this port's specific token.
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(listener) = &mut self.listener {
-            match local_index.0 {
+            match usize::from(local_index) {
                 LISTENER_INDEX => match listener.accept() {
                     Ok((mut stream, addr)) => {
                         let available_slot =
@@ -834,11 +832,9 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                         }
                         let slot = available_slot.unwrap();
                         let _ = set_nodelay(&stream);
-                        let _ = self.registry.register(
-                            &mut stream,
-                            LocalIndex(slot),
-                            Interest::READABLE,
-                        );
+                        let _ =
+                            self.registry
+                                .register(&mut stream, slot.into(), Interest::READABLE);
                         log_event(
                             journal,
                             &self.port_info,
@@ -856,7 +852,7 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                     }
                 },
                 _ => {
-                    let slot = local_index.0;
+                    let slot = usize::from(local_index);
                     if slot < MAX_CLIENTS {
                         let mut disconnect = false;
                         let mut peer_addr = None;
@@ -1021,7 +1017,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
                 Ok(mut listener) => {
                     let _ = self.registry.register(
                         &mut listener,
-                        LocalIndex(POINT_TO_POINT_LISTENER_INDEX),
+                        POINT_TO_POINT_LISTENER_INDEX.into(),
                         Interest::READABLE,
                     );
                     self.listener = Some(listener);
@@ -1053,7 +1049,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
     /// Handles readable events fired by Mio on this port's specific token.
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(listener) = &mut self.listener {
-            match local_index.0 {
+            match usize::from(local_index) {
                 POINT_TO_POINT_LISTENER_INDEX => match listener.accept() {
                     Ok((mut stream, addr)) => {
                         if self.client.is_some() {
@@ -1068,12 +1064,12 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
                         let _ = set_nodelay(&stream);
                         let _ = self.registry.register(
                             &mut stream,
-                            LocalIndex(POINT_TO_POINT_CLIENT_WRITABLE_INDEX),
+                            POINT_TO_POINT_CLIENT_WRITABLE_INDEX.into(),
                             Interest::WRITABLE,
                         );
                         let _ = self.registry.register(
                             &mut stream,
-                            LocalIndex(POINT_TO_POINT_CLIENT_READABLE_INDEX),
+                            POINT_TO_POINT_CLIENT_READABLE_INDEX.into(),
                             Interest::READABLE,
                         );
                         log_event(
@@ -1293,12 +1289,12 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
                 Ok(mut stream) => {
                     let _ = self.registry.register(
                         &mut stream,
-                        LocalIndex(POINT_TO_POINT_CONNECT_WRITABLE_INDEX),
+                        POINT_TO_POINT_CONNECT_WRITABLE_INDEX.into(),
                         Interest::WRITABLE,
                     );
                     let _ = self.registry.register(
                         &mut stream,
-                        LocalIndex(POINT_TO_POINT_CONNECT_READABLE_INDEX),
+                        POINT_TO_POINT_CONNECT_READABLE_INDEX.into(),
                         Interest::READABLE,
                     );
 
@@ -1324,7 +1320,7 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
     /// Handles readable/writable events fired by Mio on this port's specific tokens.
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
-            match local_index.0 {
+            match usize::from(local_index) {
                 POINT_TO_POINT_CONNECT_WRITABLE_INDEX => {
                     if !self.is_established {
                         match stream.take_error() {

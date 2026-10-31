@@ -1,7 +1,7 @@
 use journal::journal::Journal;
 use mio::Token;
 
-use crate::token::{self, LocalIndex};
+use crate::token::{Domain, LocalIndex};
 
 pub trait NetworkEngine {
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal);
@@ -20,11 +20,11 @@ macro_rules! impl_engine_dispatcher {
         impl<$($name: NetworkEngine),+> EngineDispatcher for ($($name,)+) {
             #[inline(always)]
             fn on_event(&mut self, token: Token, journal: &mut Journal) {
-                let prefix = token::prefix(token);
-                let local_index = token::local_index(token);
-                match prefix {
+                let domain: u8 = Domain::from(token).into();
+                let local_index = token.into();
+                match domain {
                     $( $idx => self.$idx.on_event(local_index, journal), )+
-                    _ => unreachable!("Invalid token prefix"),
+                    _ => unreachable!("Invalid token domain"),
                 }
             }
 
