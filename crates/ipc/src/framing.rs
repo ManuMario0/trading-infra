@@ -102,6 +102,10 @@ impl FrameReader {
                             );
 
                             let body_len = header.payload_len as usize;
+                            if body_len == 0 {
+                                completed.push(vec![]);
+                                continue;
+                            }
                             self.buf.resize(body_len, 0);
                             self.filled = 0;
                             self.expected = body_len;
@@ -246,6 +250,27 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn send_recv_empty_frame() {
+        let payload = vec![];
+        let mut buffer = Buffer::new(vec![], vec![]);
+
+        let mut writer = FrameWriter::new();
+        let mut reader = FrameReader::new();
+
+        writer.enqueue(payload.clone());
+
+        let write_result = writer.try_flush(&mut buffer);
+
+        assert!(write_result.is_ok());
+        assert_eq!(write_result.unwrap(), true);
+
+        let read_result = reader.try_read(&mut buffer);
+        assert!(read_result.is_ok());
+
+        assert_eq!(read_result.unwrap(), vec![payload]);
     }
 
     #[test]
