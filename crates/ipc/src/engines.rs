@@ -22,6 +22,12 @@ use crate::socket::CHANNEL_SIZE;
 use crate::socket::{RecvSocket, SendSocket};
 use crate::token::{LocalIndex, TokenRegistry};
 
+/// Any operations that have no upper bound on the amount of operations should use this value for
+/// upperbound reference.
+///
+/// The main use is for unknown message count inbound, to enable fair sharing of the network thread.
+const FUEL_TANK: usize = 64;
+
 /// Set `TCP_NODELAY` on a newly-created mio TCP stream.
 ///
 /// For a 1-second trading engine, Nagle's algorithm can add unacceptable
@@ -125,81 +131,66 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     /// Handles readable events fired by Mio on this port's specific token.
     fn on_event(&mut self, local_index: LocalIndex, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
-            if usize::from(local_index) == 0 {
-                if !self.is_established {
-                    match stream.take_error() {
-                        Ok(None) => {
-                            self.is_established = true;
-                            self.backoff.reset();
-                            log_event(
-                                journal,
-                                &self.port_info,
-                                LogLevel::Info,
-                                NetworkEventKind::Connected { peer: self.addr },
-                            );
-                        }
-                        _ => {
-                            self.stream = None;
-                            self.backoff.mark_failed();
-                        }
+            assert!(usize::from(local_index) == 0);
+            if !self.is_established {
+                match stream.take_error() {
+                    Ok(None) => {
+                        self.is_established = true;
+                        self.backoff.reset();
+                        log_event(
+                            journal,
+                            &self.port_info,
+                            LogLevel::Info,
+                            NetworkEventKind::Connected { peer: self.addr },
+                        );
                     }
-                } else {
-                    match self.reader.try_read(stream) {
-                        Ok(messages) => {
-                            for raw_msg in messages {
-                                // Deserialize the raw framing buffer directly to the typed Struct
-                                if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg)
-                                    && self.queue.try_write(msg).is_some()
-                                {
-                                    log_event(
-                                        journal,
-                                        &self.port_info,
-                                        LogLevel::Warn,
-                                        NetworkEventKind::ChannelFull,
-                                    );
-                                }
+                    _ => {
+                        self.stream = None;
+                        self.backoff.mark_failed();
+                    }
+                }
+            } else {
+                let mut fuel = FUEL_TANK;
+                loop {
+                    match self
+                        .reader
+                        .try_read_with(stream, |a| postcard::from_bytes::<Msg>(a))
+                    {
+                        Ok(Some(msg)) => {
+                            // Deserialize the raw framing buffer directly to the typed Struct
+                            if self.queue.try_write(msg).is_some() {
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Warn,
+                                    NetworkEventKind::ChannelFull,
+                                );
                             }
                         }
-                        Err(e)
-                            if e.kind() == io::ErrorKind::ConnectionReset
-                                || e.kind() == io::ErrorKind::Interrupted =>
-                        {
-                            if !self.is_established {
-                                self.stream = None;
-                                self.backoff.mark_failed();
-                                return;
-                            }
+                        Ok(None) => {
+                            break;
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
                             log_event(
                                 journal,
                                 &self.port_info,
                                 LogLevel::Warn,
-                                NetworkEventKind::Disconnected { peer: self.addr },
+                                NetworkEventKind::InvalidData,
                             );
-                            self.stream = None;
-                            self.is_established = false;
-                            self.reader = FrameReader::new();
+                            self.mark_disconnect(journal);
+                            break;
                         }
                         Err(_) => {
-                            if !self.is_established {
-                                self.stream = None;
-                                self.backoff.mark_failed();
-                                return;
-                            }
-                            log_event(
-                                journal,
-                                &self.port_info,
-                                LogLevel::Error,
-                                NetworkEventKind::Disconnected { peer: self.addr },
-                            );
-                            self.stream = None;
-                            self.is_established = false;
-                            self.reader = FrameReader::new();
-                            self.backoff.mark_failed();
+                            self.mark_disconnect(journal);
+                            break;
                         }
                     }
+                    fuel -= 1;
+
+                    if fuel == 0 {
+                        break;
+                    }
                 }
-            } else {
-                unreachable!()
             }
         }
     }
@@ -207,6 +198,24 @@ impl<Msg: DeserializeOwned> TcpBroadcastConnectEngine<Msg> {
     #[inline(always)]
     fn on_wake(&mut self, _journal: &mut Journal) {
         // do nothing, we are not listening to an SPSC channel
+    }
+
+    fn mark_disconnect(&mut self, journal: &mut Journal) {
+        if !self.is_established {
+            self.stream = None;
+            self.backoff.mark_failed();
+            return;
+        }
+        log_event(
+            journal,
+            &self.port_info,
+            LogLevel::Error,
+            NetworkEventKind::Disconnected { peer: self.addr },
+        );
+        self.stream = None;
+        self.is_established = false;
+        self.reader.reset();
+        self.backoff.mark_failed();
     }
 }
 
@@ -409,7 +418,18 @@ impl<Msg: Serialize> TcpAggregateConnectEngine<Msg> {
     fn on_wake(&mut self, journal: &mut Journal) {
         if let Some(stream) = &mut self.stream {
             while let Some(msg) = self.queue.try_read() {
-                self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
+                if self
+                    .writer
+                    .enqueue(postcard::to_allocvec(&msg).unwrap())
+                    .is_err()
+                {
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Error,
+                        NetworkEventKind::InvalidData,
+                    );
+                }
                 match self.writer.try_flush(stream) {
                     Ok(_) => {}
                     Err(e) => {
@@ -654,7 +674,14 @@ impl<Msg: Serialize> TcpBroadcastBindEngine<Msg> {
                     let mut disconnect = false;
                     let mut peer_addr = None;
                     if let Some(client) = client_opt {
-                        client.writer.enqueue(serialized.clone());
+                        if client.writer.enqueue(serialized.clone()).is_err() {
+                            log_event(
+                                journal,
+                                &self.port_info,
+                                LogLevel::Error,
+                                NetworkEventKind::InvalidData,
+                            );
+                        }
                         match client.writer.try_flush(&mut client.stream) {
                             Ok(_) => {}
                             Err(e) => {
@@ -857,12 +884,13 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                         let mut disconnect = false;
                         let mut peer_addr = None;
                         if let Some(client) = &mut self.clients[slot] {
-                            match client.reader.try_read(&mut client.stream) {
-                                Ok(messages) => {
-                                    for raw_msg in messages {
-                                        if let Ok(msg) = postcard::from_bytes::<Msg>(&raw_msg)
-                                            && self.queue.try_write(msg).is_some()
-                                        {
+                            let mut fuel = FUEL_TANK;
+                            loop {
+                                match client.reader.try_read_with(&mut client.stream, |a| {
+                                    postcard::from_bytes::<Msg>(a)
+                                }) {
+                                    Ok(Some(msg)) => {
+                                        if self.queue.try_write(msg).is_some() {
                                             log_event(
                                                 journal,
                                                 &self.port_info,
@@ -871,17 +899,31 @@ impl<Msg: DeserializeOwned> TcpAggregateBindEngine<Msg> {
                                             );
                                         }
                                     }
+                                    Ok(None) => {
+                                        break;
+                                    }
+                                    Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                                        log_event(
+                                            journal,
+                                            &self.port_info,
+                                            LogLevel::Warn,
+                                            NetworkEventKind::InvalidData,
+                                        );
+                                        peer_addr = Some(client.remote_addr);
+                                        disconnect = true;
+                                        break;
+                                    }
+                                    Err(_) => {
+                                        peer_addr = Some(client.remote_addr);
+                                        disconnect = true;
+                                        break;
+                                    }
                                 }
-                                Err(e)
-                                    if e.kind() == io::ErrorKind::ConnectionReset
-                                        || e.kind() == io::ErrorKind::Interrupted =>
-                                {
-                                    peer_addr = Some(client.remote_addr);
-                                    disconnect = true;
-                                }
-                                Err(_) => {
-                                    peer_addr = Some(client.remote_addr);
-                                    disconnect = true;
+
+                                fuel -= 1;
+
+                                if fuel == 0 {
+                                    break;
                                 }
                             }
                         }
@@ -1108,12 +1150,13 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
                 }
                 POINT_TO_POINT_CLIENT_READABLE_INDEX => {
                     let client = self.client.as_mut().unwrap();
-                    match client.reader.try_read(&mut client.stream) {
-                        Ok(messages) => {
-                            for raw_msg in messages {
-                                if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg)
-                                    && self.recv_queue.try_write(msg).is_some()
-                                {
+                    let mut fuel = FUEL_TANK;
+                    loop {
+                        match client.reader.try_read_with(&mut client.stream, |a| {
+                            postcard::from_bytes::<RepMsg>(a)
+                        }) {
+                            Ok(Some(msg)) => {
+                                if self.recv_queue.try_write(msg).is_some() {
                                     log_event(
                                         journal,
                                         &self.port_info,
@@ -1122,23 +1165,37 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
                                     );
                                 }
                             }
+                            Ok(None) => {
+                                break;
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Warn,
+                                    NetworkEventKind::InvalidData,
+                                );
+                                self.client = None;
+                                self.backoff.mark_failed();
+                                break;
+                            }
+                            Err(_) => {
+                                let peer_addr = client.remote_addr;
+                                self.client = None;
+                                self.backoff.mark_failed();
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Error,
+                                    NetworkEventKind::Disconnected { peer: peer_addr },
+                                );
+                                break;
+                            }
                         }
-                        Err(e)
-                            if e.kind() == io::ErrorKind::ConnectionReset
-                                || e.kind() == io::ErrorKind::Interrupted =>
-                        {
-                            let peer_addr = client.remote_addr;
-                            self.client = None;
-                            log_event(
-                                journal,
-                                &self.port_info,
-                                LogLevel::Info,
-                                NetworkEventKind::Disconnected { peer: peer_addr },
-                            );
-                        }
-                        Err(_) => {
-                            self.client = None;
-                            self.backoff.mark_failed();
+
+                        fuel -= 1;
+                        if fuel == 0 {
+                            break;
                         }
                     }
                 }
@@ -1151,7 +1208,18 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointBindEngine<Msg, Re
         let mut disconnected = false;
         if let Some(client) = &mut self.client {
             while let Some(msg) = self.send_queue.try_read() {
-                client.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
+                if client
+                    .writer
+                    .enqueue(postcard::to_allocvec(&msg).unwrap())
+                    .is_err()
+                {
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Error,
+                        NetworkEventKind::InvalidData,
+                    );
+                }
                 match client.writer.try_flush(&mut client.stream) {
                     Ok(true) => continue,
                     Ok(false) => break,
@@ -1360,60 +1428,72 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
                         }
                     }
                 }
-                POINT_TO_POINT_CONNECT_READABLE_INDEX => match self.reader.try_read(stream) {
-                    Ok(messages) => {
-                        for raw_msg in messages {
-                            if let Ok(msg) = postcard::from_bytes::<RepMsg>(&raw_msg)
-                                && self.recv_queue.try_write(msg).is_some()
-                            {
+                POINT_TO_POINT_CONNECT_READABLE_INDEX => {
+                    let mut fuel = FUEL_TANK;
+                    loop {
+                        match self
+                            .reader
+                            .try_read_with(stream, |a| postcard::from_bytes::<RepMsg>(a))
+                        {
+                            Ok(Some(msg)) => {
+                                if self.recv_queue.try_write(msg).is_some() {
+                                    log_event(
+                                        journal,
+                                        &self.port_info,
+                                        LogLevel::Warn,
+                                        NetworkEventKind::ChannelFull,
+                                    );
+                                }
+                            }
+                            Ok(None) => {
+                                break;
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
                                 log_event(
                                     journal,
                                     &self.port_info,
                                     LogLevel::Warn,
-                                    NetworkEventKind::ChannelFull,
+                                    NetworkEventKind::InvalidData,
                                 );
+                                if !self.is_established {
+                                    self.stream = None;
+                                    self.backoff.mark_failed();
+                                    return;
+                                }
+                                self.stream = None;
+                                self.is_established = false;
+                                self.writer = FrameWriter::new();
+                                self.reader.reset();
+                                self.backoff.mark_failed();
+                                break;
+                            }
+                            Err(_) => {
+                                if !self.is_established {
+                                    self.stream = None;
+                                    self.backoff.mark_failed();
+                                    return;
+                                }
+                                log_event(
+                                    journal,
+                                    &self.port_info,
+                                    LogLevel::Error,
+                                    NetworkEventKind::Disconnected { peer: self.addr },
+                                );
+                                self.stream = None;
+                                self.is_established = false;
+                                self.writer = FrameWriter::new();
+                                self.reader.reset();
+                                self.backoff.mark_failed();
+                                break;
                             }
                         }
-                    }
-                    Err(e)
-                        if e.kind() == io::ErrorKind::ConnectionReset
-                            || e.kind() == io::ErrorKind::Interrupted =>
-                    {
-                        if !self.is_established {
-                            self.stream = None;
-                            self.backoff.mark_failed();
-                            return;
+
+                        fuel -= 1;
+                        if fuel == 0 {
+                            break;
                         }
-                        log_event(
-                            journal,
-                            &self.port_info,
-                            LogLevel::Info,
-                            NetworkEventKind::Disconnected { peer: self.addr },
-                        );
-                        self.stream = None;
-                        self.is_established = false;
-                        self.writer = FrameWriter::new();
-                        self.reader = FrameReader::new();
                     }
-                    Err(_) => {
-                        if !self.is_established {
-                            self.stream = None;
-                            self.backoff.mark_failed();
-                            return;
-                        }
-                        log_event(
-                            journal,
-                            &self.port_info,
-                            LogLevel::Error,
-                            NetworkEventKind::Disconnected { peer: self.addr },
-                        );
-                        self.stream = None;
-                        self.is_established = false;
-                        self.writer = FrameWriter::new();
-                        self.reader = FrameReader::new();
-                        self.backoff.mark_failed();
-                    }
-                },
+                }
                 _ => unreachable!(),
             }
         }
@@ -1423,7 +1503,18 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> TcpPointToPointConnectEngine<Msg,
         let mut disconnected = false;
         if let Some(stream) = &mut self.stream {
             while let Some(msg) = self.send_queue.try_read() {
-                self.writer.enqueue(postcard::to_allocvec(&msg).unwrap());
+                if self
+                    .writer
+                    .enqueue(postcard::to_allocvec(&msg).unwrap())
+                    .is_err()
+                {
+                    log_event(
+                        journal,
+                        &self.port_info,
+                        LogLevel::Error,
+                        NetworkEventKind::InvalidData,
+                    );
+                }
                 match self.writer.try_flush(stream) {
                     Ok(true) => continue,
                     Ok(false) => break,

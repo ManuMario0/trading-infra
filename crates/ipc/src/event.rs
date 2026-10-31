@@ -62,6 +62,9 @@ pub enum NetworkEventKind {
 
     /// OS / System-level operational error.
     Error(NetworkError),
+
+    /// Invalid payload
+    InvalidData,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
