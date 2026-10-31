@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 use std::thread;
 
+use ipc::address::Address;
 use ipc::make_ipc;
 use journal::entry::{LogLevel, ServiceKind, ThreadKind};
 use journal::journal::Journal;
@@ -54,11 +55,15 @@ pub fn run(
     info: ModuleInfo,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Acquire addresses
-    let allocation_input_addr = env::parse_or("ALLOCATION_INPUT", "127.0.0.1:8001".to_string());
-    let market_data_addr = env::parse_or("MARKET_DATA", "127.0.0.1:8002".to_string());
+    let allocation_input_addr = env::parse_or(
+        "ALLOCATION_INPUT",
+        "127.0.0.1:8001".parse::<Address>().unwrap(),
+    );
+    let market_data_addr =
+        env::parse_or("MARKET_DATA", "127.0.0.1:8002".parse::<Address>().unwrap());
     let manager_execution_engine_pipe_addr = env::parse_or(
         "MANAGER_EXECUTION_ENGINE_PIPE",
-        "127.0.0.1:8003".to_string(),
+        "127.0.0.1:8003".parse::<Address>().unwrap(),
     );
 
     // Setup IPC
@@ -72,9 +77,9 @@ pub fn run(
     ) = make_ipc!(
         // Here we bind to the allocation input for consistency. However, in theory, only one client connects to it as it does not multiplex.
         // The implementation WILL panic if more than one client sends data to this aggregate port.
-        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=&allocation_input_addr, transport=TCP,
-        MARKET_DATA: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr=&market_data_addr, transport=TCP,
-        MANAGER_EXECUTION_ENGINE_PIPE: kind=PointToPoint, role=Connect, ty=Target, rep_ty=Actual, addr=&manager_execution_engine_pipe_addr, transport=TCP,
+        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=allocation_input_addr, transport=TCP,
+        MARKET_DATA: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr=market_data_addr, transport=TCP,
+        MANAGER_EXECUTION_ENGINE_PIPE: kind=PointToPoint, role=Connect, ty=Target, rep_ty=Actual, addr=manager_execution_engine_pipe_addr, transport=TCP,
     );
 
     let manifest = Manifest {

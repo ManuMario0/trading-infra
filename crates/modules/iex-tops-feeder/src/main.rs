@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use iex_tops_feeder::bookkeeper::SoaBookKeeper;
 use iex_tops_feeder::pcap::Parser;
+use ipc::address::Address;
 use ipc::make_ipc;
 use journal::entry::{LogLevel, ServiceKind, ThreadKind};
 use journal::journal::Journal;
@@ -17,11 +18,14 @@ use trading_sdk::identity::ServiceId;
 fn main() {
     let path = env::parse_or("PCAP_PATH", "".to_string());
 
-    let market_data_output_addr = env::parse_or("MARKET_DATA_OUTPUT", "127.0.0.1:8001".to_string());
+    let market_data_output_addr = env::parse_or(
+        "MARKET_DATA_OUTPUT",
+        "127.0.0.1:8001".parse::<Address>().unwrap(),
+    );
 
     // Setup IPC
     let (runner, blueprint, _stop_handle, mut market_data_socket) = make_ipc!(
-        MARKET_DATA_OUTPUT: kind=Broadcast, role=Bind, ty=MarketDataBatch, addr=&market_data_output_addr, transport=TCP,
+        MARKET_DATA_OUTPUT: kind=Broadcast, role=Bind, ty=MarketDataBatch, addr=market_data_output_addr, transport=TCP,
     );
 
     let manifest = Manifest {

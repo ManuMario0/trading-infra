@@ -13,6 +13,7 @@ use mio::{Interest, Waker};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::address::Address;
 use crate::backoff::BackoffTimer;
 use crate::dispatcher::NetworkEngine;
 use crate::event::{NetworkEvent, NetworkEventKind, PortInfo};
@@ -227,19 +228,21 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Broadcast, Connect)
 
     fn build(
         name: &str,
-        addr: &str,
+        addr: Address,
         registry: TokenRegistry,
         _waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
-        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
+        let socket_addr = addr
+            .as_socket_addr()
+            .expect("invalid address type for TCP connect");
         let port_info = PortInfo {
             port_name: name.to_string(),
-            addr: addr.to_owned(),
+            addr,
             transport: "TCP".to_string(),
             kind: "Broadcast".to_string(),
             role: "Connect".to_string(),
         };
-        TcpBroadcastConnectEngine::new(port_info, parsed_addr, registry)
+        TcpBroadcastConnectEngine::new(port_info, socket_addr, registry)
     }
 }
 
@@ -462,19 +465,21 @@ impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Aggregate, Connect) {
 
     fn build(
         name: &str,
-        addr: &str,
+        addr: Address,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
-        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
+        let socket_addr = addr
+            .as_socket_addr()
+            .expect("invalid address type for TCP connect");
         let port_info = PortInfo {
             port_name: name.to_string(),
-            addr: addr.to_owned(),
+            addr,
             transport: "TCP".to_string(),
             kind: "Aggregate".to_string(),
             role: "Connect".to_string(),
         };
-        TcpAggregateConnectEngine::new(port_info, parsed_addr, registry, waker)
+        TcpAggregateConnectEngine::new(port_info, socket_addr, registry, waker)
     }
 }
 
@@ -719,19 +724,21 @@ impl<Msg: Serialize> SocketFactory<Msg, ()> for (TCP, Broadcast, Bind) {
 
     fn build(
         name: &str,
-        addr: &str,
+        addr: Address,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
-        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
+        let socket_addr = addr
+            .as_socket_addr()
+            .expect("invalid address type for TCP connect");
         let port_info = PortInfo {
             port_name: name.to_string(),
-            addr: addr.to_owned(),
+            addr,
             transport: "TCP".to_string(),
             kind: "Broadcast".to_string(),
             role: "Bind".to_string(),
         };
-        TcpBroadcastBindEngine::new(port_info, parsed_addr, registry, waker)
+        TcpBroadcastBindEngine::new(port_info, socket_addr, registry, waker)
     }
 }
 
@@ -955,19 +962,21 @@ impl<Msg: DeserializeOwned> SocketFactory<Msg, ()> for (TCP, Aggregate, Bind) {
 
     fn build(
         name: &str,
-        addr: &str,
+        addr: Address,
         registry: TokenRegistry,
         _waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
-        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP bind");
+        let socket_addr = addr
+            .as_socket_addr()
+            .expect("invalid address type for TCP connect");
         let port_info = PortInfo {
             port_name: name.to_string(),
-            addr: addr.to_owned(),
+            addr,
             transport: "TCP".to_string(),
             kind: "Aggregate".to_string(),
             role: "Bind".to_string(),
         };
-        TcpAggregateBindEngine::new(port_info, parsed_addr, registry)
+        TcpAggregateBindEngine::new(port_info, socket_addr, registry)
     }
 }
 
@@ -1255,19 +1264,21 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
 
     fn build(
         name: &str,
-        addr: &str,
+        addr: Address,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
-        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP bind");
+        let socket_addr = addr
+            .as_socket_addr()
+            .expect("invalid address type for TCP connect");
         let port_info = PortInfo {
             port_name: name.to_string(),
-            addr: addr.to_owned(),
+            addr,
             transport: "TCP".to_string(),
             kind: "PointToPoint".to_string(),
             role: "Bind".to_string(),
         };
-        TcpPointToPointBindEngine::new(port_info, parsed_addr, registry, waker)
+        TcpPointToPointBindEngine::new(port_info, socket_addr, registry, waker)
     }
 }
 
@@ -1553,19 +1564,21 @@ impl<Msg: Serialize, RepMsg: DeserializeOwned> SocketFactory<Msg, RepMsg>
 
     fn build(
         name: &str,
-        addr: &str,
+        addr: Address,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle) {
-        let parsed_addr: SocketAddr = addr.parse().expect("Invalid SocketAddr for TCP connect");
+        let socket_addr = addr
+            .as_socket_addr()
+            .expect("invalid address type for TCP connect");
         let port_info = PortInfo {
             port_name: name.to_string(),
-            addr: addr.to_owned(),
+            addr,
             transport: "TCP".to_string(),
             kind: "PointToPoint".to_string(),
             role: "Connect".to_string(),
         };
-        TcpPointToPointConnectEngine::new(port_info, parsed_addr, registry, waker)
+        TcpPointToPointConnectEngine::new(port_info, socket_addr, registry, waker)
     }
 }
 

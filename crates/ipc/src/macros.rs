@@ -74,12 +74,15 @@ macro_rules! make_ipc {
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
+    use crate::address::Address;
 
     #[test]
     fn test_make_ipc() {
         let (_runner, blueprint, _handle, _socket1, _socket2) = make_ipc!(
-            PORT_A: kind=Aggregate, role=Bind, ty=u64, addr="127.0.0.1:8001", transport=TCP,
-            PORT_B: kind=Broadcast, role=Connect, ty=u64, addr="127.0.0.1:8002", transport=TCP,
+            PORT_A: kind=Aggregate, role=Bind, ty=u64, addr=Address::ip_v4(Ipv4Addr::new(127, 0, 0, 1), 8001), transport=TCP,
+            PORT_B: kind=Broadcast, role=Connect, ty=u64, addr=Address::ip_v4(Ipv4Addr::new(127, 0, 0, 1), 8002), transport=TCP,
         );
 
         assert_eq!(blueprint.ports.len(), 2);

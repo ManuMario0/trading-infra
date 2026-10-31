@@ -44,7 +44,7 @@ pub fn run_cli(app: &mut App) {
 
                 let mut addr_map = BTreeMap::new();
                 println!(
-                    "Enter port overrides (FORMAT: PORT_NAME:address, e.g. LOGS:tcp://127.0.0.1:5000)"
+                    "Enter port overrides (FORMAT: PORT_NAME:address, e.g. LOGS:127.0.0.1:5000)"
                 );
 
                 for p in manifest.blueprint.all_ports() {

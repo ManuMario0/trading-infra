@@ -7,6 +7,8 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
+use crate::address::Address;
+
 /// Fixed metadata holding the static network configuration for a specific port.
 ///
 /// Kept purely decoupled from dynamic event flow. The Engine holds onto an
@@ -14,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortInfo {
     pub port_name: String,
-    pub addr: String,
+    pub addr: Address,
     pub transport: String,
     pub kind: String,
     pub role: String,

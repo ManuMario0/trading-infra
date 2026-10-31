@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use mio::Waker;
 
+use crate::address::Address;
 use crate::token::TokenRegistry;
 
 // ── Protocol / Transports ──────────────────────────────────────────────────
@@ -51,7 +52,7 @@ pub trait SocketFactory<Tx, Rx = ()> {
     /// Instantiates the specific IPC branch.
     fn build(
         name: &str,
-        addr: &str,
+        addr: Address,
         registry: TokenRegistry,
         waker: Arc<Waker>,
     ) -> (Self::Engine, Self::Handle);
