@@ -25,7 +25,7 @@ fn main() {
 
     // Setup IPC
     let (runner, blueprint, _stop_handle, mut market_data_socket) = make_ipc!(
-        MARKET_DATA_OUTPUT: kind=Broadcast, role=Bind, ty=MarketDataBatch, addr=market_data_output_addr, transport=TCP,
+        MARKET_DATA_OUTPUT: kind=Broadcast, role=Bind, ty=MarketDataBatch, addr=market_data_output_addr,
     );
 
     let manifest = Manifest {

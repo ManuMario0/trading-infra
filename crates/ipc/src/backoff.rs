@@ -63,10 +63,12 @@ impl BackoffTimer {
         self.next_retry = Instant::now();
     }
 
+    #[allow(unused)]
     pub fn is_maxed(&self) -> bool {
         self.current_duration == self.max_duration
     }
 
+    #[allow(unused)]
     pub fn attempt(&self) -> u32 {
         self.attempt
     }

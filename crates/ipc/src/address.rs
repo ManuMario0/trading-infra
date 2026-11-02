@@ -1,9 +1,11 @@
 //! Address models for network configuration.
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
+use std::{fmt, io};
+
+use crate::transport::{Connector, Listener};
 
 /// A network address for a communication endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +35,14 @@ impl Address {
             Address::SHM(s) => Ok(s.clone()),
             _ => Err("not a shared memory address".to_string()),
         }
+    }
+
+    pub fn into_listener<R>(self) -> io::Result<Listener<R>> {
+        Listener::new(self)
+    }
+
+    pub fn into_connector<R>(self) -> io::Result<Connector<R>> {
+        Connector::new(self)
     }
 }
 

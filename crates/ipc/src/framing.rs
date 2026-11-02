@@ -4,7 +4,6 @@
 //! stream implementing `std::io::Read` and `std::io::Write`.
 //! All operations handle `WouldBlock` and `Interrupted` correctly.
 
-use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
 /// The maximum size (in bytes) of a frame that can be sent or received through this interface.
@@ -131,6 +130,7 @@ impl FrameReader {
     ///
     /// Useful when a connection is dropped or reset and a clean state is required
     /// without reallocating the underlying buffer.
+    #[allow(unused)]
     pub fn reset(&mut self) {
         self.reading_body = false;
         self.inner_frame_reader.expect(HEADER_BYTES);
@@ -220,74 +220,102 @@ impl FrameReader {
 // ── Write-side state machine ────────────────────────────────────────────────
 
 /// Per-connection write state.
-///
-/// Enqueue serialized messages via `enqueue`; call `try_flush` whenever
-/// the event loop signals that the stream is writable.
-#[derive(Default)]
 pub struct FrameWriter {
-    /// FIFO of fully-framed on-wire messages (length prefix + body).
-    queue: VecDeque<Vec<u8>>,
-    /// Bytes of `queue.front()` already written.
-    write_cursor: usize,
+    /// Fully-framed on-wire message.
+    buf: Box<[u8; HEADER_BYTES + MAX_FRAME_SIZE]>,
+    /// Bytes of the frame already written.
+    written: usize,
+    /// Size of the frame stored in `buf`.
+    frame_size: usize,
 }
 
 impl FrameWriter {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            buf: Box::new([0u8; HEADER_BYTES + MAX_FRAME_SIZE]),
+            written: 0,
+            frame_size: 0,
+        }
     }
 
     /// Frames and enqueues `payload` (body-only bytes; header is prepended here).
     ///
     /// Returns an [`io::ErrorKind::InvalidData`] error if `payload.len()` exceeds [`MAX_FRAME_SIZE`].
-    pub fn enqueue(&mut self, payload: Vec<u8>) -> io::Result<()> {
-        let payload_len = payload.len();
-        if payload_len > MAX_FRAME_SIZE {
+    #[allow(unused)]
+    pub fn try_write<S: Write>(&mut self, stream: &mut S, payload: &[u8]) -> io::Result<()> {
+        let len = payload.len();
+        if len > MAX_FRAME_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("frame length {payload_len} exceeds max {MAX_FRAME_SIZE}"),
+                "payload is too big",
             ));
+        };
+        let mut static_payload: [u8; MAX_FRAME_SIZE] = [0u8; MAX_FRAME_SIZE];
+        static_payload.as_mut_slice().write_all(payload)?;
+        self.try_write_with(stream, &static_payload, |payload, mut slice| {
+            slice.write(&payload[..len])
+        })
+    }
+
+    pub fn try_write_with<S: Write, F, R, E>(
+        &mut self,
+        stream: &mut S,
+        payload: &R,
+        f: F,
+    ) -> io::Result<()>
+    where
+        F: FnOnce(&R, &mut [u8]) -> Result<usize, E>,
+    {
+        // First trying to flush any existing frame leftover.
+        if self.written != self.frame_size {
+            let written = stream.write(&self.buf[self.written..self.frame_size])?;
+            self.written += written;
+            if self.written != self.frame_size {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "the payload could not be fully written",
+                ));
+            }
         }
 
-        let header = FrameHeader {
-            payload_len: payload.len() as u32,
+        // Now writing up new frame
+        let payload_len = match f(payload, &mut self.buf[HEADER_BYTES..]) {
+            Ok(len) => len,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unable to serialize payload",
+                ));
+            }
         };
 
-        let mut frame = Vec::with_capacity(HEADER_BYTES + payload.len());
-        frame.extend_from_slice(&header.to_bytes());
-        frame.extend_from_slice(&payload);
-        self.queue.push_back(frame);
+        let header = FrameHeader {
+            payload_len: payload_len as u32,
+        };
+
+        self.buf[..HEADER_BYTES].copy_from_slice(&header.to_bytes());
+
+        self.frame_size = payload_len + HEADER_BYTES;
+        self.written = 0;
+        let written = stream.write(&self.buf[self.written..self.frame_size])?;
+        self.written += written;
+
         Ok(())
     }
 
-    /// Flush queued frames to `stream`.
-    ///
-    /// * `Ok(true)` — all data sent.
-    /// * `Ok(false)` — more data remains; re-register WRITABLE.
-    /// * `Err(WouldBlock)` — same as `Ok(false)`.
-    /// * `Err(other)` — connection broken.
-    pub fn try_flush<S: Write>(&mut self, stream: &mut S) -> io::Result<bool> {
-        while let Some(frame) = self.queue.front() {
-            let remaining = &frame[self.write_cursor..];
-            match stream.write(remaining) {
-                Ok(0) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "write returned 0 bytes",
-                    ));
+    pub fn is_writable<S: Write>(&mut self, stream: &mut S) -> bool {
+        if self.written != self.frame_size {
+            let written = match stream.write(&self.buf[self.written..self.frame_size]) {
+                Ok(a) => a,
+                Err(_) => {
+                    return false;
                 }
-                Ok(n) => {
-                    self.write_cursor += n;
-                    if self.write_cursor == frame.len() {
-                        self.queue.pop_front();
-                        self.write_cursor = 0;
-                    }
-                }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(false),
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e),
-            }
+            };
+            self.written += written;
+            self.written == self.frame_size
+        } else {
+            true
         }
-        Ok(true)
     }
 }
 
@@ -365,12 +393,7 @@ mod tests {
         let mut writer = FrameWriter::new();
         let mut reader = FrameReader::new();
 
-        writer.enqueue(payload.clone()).unwrap();
-
-        let write_result = writer.try_flush(&mut buffer);
-
-        assert!(write_result.is_ok());
-        assert_eq!(write_result.unwrap(), true);
+        writer.try_write(&mut buffer, &payload.clone()).unwrap();
 
         let read_result = reader.try_read(&mut buffer);
         assert!(read_result.is_ok());
@@ -386,12 +409,7 @@ mod tests {
         let mut writer = FrameWriter::new();
         let mut reader = FrameReader::new();
 
-        writer.enqueue(payload.clone()).unwrap();
-
-        let write_result = writer.try_flush(&mut buffer);
-
-        assert!(write_result.is_ok());
-        assert_eq!(write_result.unwrap(), true);
+        writer.try_write(&mut buffer, &payload.clone()).unwrap();
 
         let read_result = reader.try_read(&mut buffer);
         assert!(read_result.is_ok());
@@ -407,22 +425,16 @@ mod tests {
         let mut writer = FrameWriter::new();
         let mut reader = FrameReader::new();
 
-        writer.enqueue(payload.clone()).unwrap();
+        assert!(writer.try_write(&mut buffer, &payload.clone()).is_err());
 
-        let write_result = writer.try_flush(&mut buffer);
-
-        assert!(write_result.is_ok());
-        assert_eq!(write_result.unwrap(), false);
+        assert_eq!(writer.is_writable(&mut buffer), false);
 
         let read_result = reader.try_read(&mut buffer);
         assert!(read_result.is_ok());
 
         assert_eq!(read_result.unwrap(), None);
 
-        let write_result = writer.try_flush(&mut buffer);
-
-        assert!(write_result.is_ok());
-        assert_eq!(write_result.unwrap(), true);
+        assert_eq!(writer.is_writable(&mut buffer), true);
 
         let read_result = reader.try_read(&mut buffer);
         assert!(read_result.is_ok());
@@ -438,13 +450,10 @@ mod tests {
         let mut writer = FrameWriter::new();
         let mut reader = FrameReader::new();
 
-        writer.enqueue(payload.clone()).unwrap();
-        writer.enqueue(payload.clone()).unwrap();
+        writer.try_write(&mut buffer, &payload.clone()).unwrap();
+        writer.try_write(&mut buffer, &payload.clone()).unwrap();
 
-        let write_result = writer.try_flush(&mut buffer);
-
-        assert!(write_result.is_ok());
-        assert_eq!(write_result.unwrap(), true);
+        assert_eq!(writer.is_writable(&mut buffer), true);
 
         let read_result = reader.try_read(&mut buffer);
         assert!(read_result.is_ok());
@@ -460,9 +469,10 @@ mod tests {
     #[test]
     fn huge_payload() {
         let payload = vec![0u8; MAX_FRAME_SIZE + 1];
+        let mut buffer = Buffer::new(vec![], vec![]);
 
         let mut writer = FrameWriter::new();
 
-        assert!(writer.enqueue(payload).is_err());
+        assert!(writer.try_write(&mut buffer, &payload).is_err());
     }
 }

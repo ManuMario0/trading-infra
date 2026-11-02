@@ -3,8 +3,6 @@
 //! The `NetworkEventLogger` trait is the sink; any struct implementing it
 //! can be dynamically dispatched to receive system telemetry optimally.
 
-use std::net::SocketAddr;
-
 use serde::{Deserialize, Serialize};
 
 use crate::address::Address;
@@ -17,7 +15,6 @@ use crate::address::Address;
 pub struct PortInfo {
     pub port_name: String,
     pub addr: Address,
-    pub transport: String,
     pub kind: String,
     pub role: String,
 }
@@ -33,11 +30,11 @@ pub struct NetworkEvent {
 pub enum NetworkEventKind {
     /// A remote peer successfully connected.
     Connected {
-        peer: SocketAddr,
+        peer: Address,
     },
     /// A remote peer disconnected (read returned 0 / peer closed connection).
     Disconnected {
-        peer: SocketAddr,
+        peer: Address,
     },
     /// We are actively backing off before retrying the connection.
     Reconnecting {
@@ -45,7 +42,7 @@ pub enum NetworkEventKind {
     },
     /// The engine successfully re-established a previously broken connection.
     Reconnected {
-        peer: SocketAddr,
+        peer: Address,
     },
     /// The backoff timer exceeded its maximum allowed duration.
     ///
@@ -59,7 +56,7 @@ pub enum NetworkEventKind {
 
     /// A remote client tried to connect on an already bind point-to-point server.
     RejectedDuplicateClient {
-        peer: SocketAddr,
+        peer: Address,
     },
 
     /// OS / System-level operational error.

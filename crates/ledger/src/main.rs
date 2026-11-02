@@ -34,9 +34,9 @@ fn main() {
         _ledger_update_socket,
         _execution_result_socket,
     ) = make_ipc!(
-        MARKET_DATA_PIPE: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr="127.0.0.1:8001".parse::<Address>().unwrap(), transport=TCP,
-        LEDGER_UPDATE_PIPE: kind=Broadcast, role=Bind, ty=LedgerUpdate, addr="127.0.0.1:8002".parse::<Address>().unwrap(), transport=TCP,
-        EXECUTION_RESULT_PIPE: kind=Broadcast, role=Connect, ty=ExecutionResult, addr="127.0.0.1:8003".parse::<Address>().unwrap(), transport=TCP,
+        MARKET_DATA_PIPE: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr="127.0.0.1:8001".parse::<Address>().unwrap(),
+        LEDGER_UPDATE_PIPE: kind=Broadcast, role=Bind, ty=LedgerUpdate, addr="127.0.0.1:8002".parse::<Address>().unwrap(),
+        EXECUTION_RESULT_PIPE: kind=Broadcast, role=Connect, ty=ExecutionResult, addr="127.0.0.1:8003".parse::<Address>().unwrap(),
     );
 
     let manifest = Manifest {

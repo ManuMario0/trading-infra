@@ -78,9 +78,9 @@ pub fn run(
         mut ledger_update_socket,
         mut execution_result_socket,
     ) = make_ipc!(
-        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=allocation_input_addr, transport=TCP,
-        LEDGER_UPDATE_INPUT: kind=Broadcast, role=Connect, ty=Envelope<LedgerUpdate>, addr=ledger_update_input_addr, transport=TCP,
-        ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, ty=Envelope<Allocation>, addr=allocation_output_addr, transport=TCP,
+        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=allocation_input_addr,
+        LEDGER_UPDATE_INPUT: kind=Broadcast, role=Connect, ty=Envelope<LedgerUpdate>, addr=ledger_update_input_addr,
+        ALLOCATION_OUTPUT: kind=Aggregate, role=Connect, ty=Envelope<Allocation>, addr=allocation_output_addr,
     );
 
     let manifest = Manifest {

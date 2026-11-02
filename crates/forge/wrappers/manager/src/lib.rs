@@ -6,6 +6,10 @@
 //! This is a real crate in the workspace so you get full rust-analyzer
 //! support while developing. Forge only generates a thin main.rs that
 //! wires the user module into this wrapper.
+//!
+//! # TODO
+//!
+//! Have the ManagerMessage enum be put in the trading_sdk for proper interfacing later on.
 
 use std::path::PathBuf;
 use std::thread;
@@ -14,6 +18,7 @@ use ipc::address::Address;
 use ipc::make_ipc;
 use journal::entry::{LogLevel, ServiceKind, ThreadKind};
 use journal::journal::Journal;
+use serde::{Deserialize, Serialize};
 use service::envelope::Envelope;
 use service::event::{ServiceEventKind, ServiceLifetimeEvent};
 use service::manifest::Manifest;
@@ -21,6 +26,30 @@ use service::{env, identity::Identity};
 use trading_sdk::identity::ServiceId;
 use trading_sdk::model::context::Context;
 use trading_sdk::{Actual, Allocation, Manager, MarketDataBatch, Target};
+
+#[derive(Serialize, Deserialize)]
+enum ManagerMessage {
+    Target(Target),
+    Actual(Actual),
+}
+
+impl ManagerMessage {
+    #[allow(unused)]
+    fn target(self) -> Target {
+        match self {
+            ManagerMessage::Target(t) => t,
+            ManagerMessage::Actual(_) => panic!(),
+        }
+    }
+
+    #[allow(unused)]
+    fn actual(self) -> Actual {
+        match self {
+            ManagerMessage::Target(_) => panic!(),
+            ManagerMessage::Actual(a) => a,
+        }
+    }
+}
 
 /// Metadata about the user module, injected by Forge at build time.
 pub struct ModuleInfo {
@@ -77,9 +106,9 @@ pub fn run(
     ) = make_ipc!(
         // Here we bind to the allocation input for consistency. However, in theory, only one client connects to it as it does not multiplex.
         // The implementation WILL panic if more than one client sends data to this aggregate port.
-        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=allocation_input_addr, transport=TCP,
-        MARKET_DATA: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr=market_data_addr, transport=TCP,
-        MANAGER_EXECUTION_ENGINE_PIPE: kind=PointToPoint, role=Connect, ty=Target, rep_ty=Actual, addr=manager_execution_engine_pipe_addr, transport=TCP,
+        ALLOCATION_INPUT: kind=Aggregate, role=Bind, ty=Envelope<Allocation>, addr=allocation_input_addr,
+        MARKET_DATA: kind=Broadcast, role=Connect, ty=MarketDataBatch, addr=market_data_addr,
+        MANAGER_EXECUTION_ENGINE_PIPE: kind=PointToPoint, role=Connect, ty=ManagerMessage, addr=manager_execution_engine_pipe_addr,
     );
 
     let manifest = Manifest {
@@ -138,7 +167,7 @@ pub fn run(
                 journal: &mut journal_wrapper,
             };
             if let Some(target) = manager.on_allocation(context, allocation_msg.payload) {
-                target_socket.send(target);
+                target_socket.send(ManagerMessage::Target(target));
             }
         }
         while let Some(market_data_msg) = market_data_socket.try_recv() {
@@ -146,15 +175,15 @@ pub fn run(
                 journal: &mut journal_wrapper,
             };
             if let Some(target) = manager.on_market_data(context, market_data_msg) {
-                target_socket.send(target);
+                target_socket.send(ManagerMessage::Target(target));
             }
         }
         while let Some(actual_msg) = actual_socket.try_recv() {
             let context = Context {
                 journal: &mut journal_wrapper,
             };
-            if let Some(target) = manager.on_portfolio(context, actual_msg) {
-                target_socket.send(target);
+            if let Some(target) = manager.on_portfolio(context, actual_msg.actual()) {
+                target_socket.send(ManagerMessage::Target(target));
             }
         }
     }
