@@ -71,16 +71,3 @@ pub enum NetworkError {
     SystemError { os_error_code: Option<i32> },
     FramingError { description: String },
 }
-
-/// Implement this trait and pass it to the network engines to receive
-/// all telemetry natively during the `mio::Poll` loop.
-pub trait NetworkEventLogger {
-    fn log(&mut self, event: NetworkEvent);
-}
-
-/// A highly-optimized no-op logger. When used, the Rust compiler handles
-/// aggressively eliminating event allocations via Dead-Code Elimination.
-pub struct NoopLogger;
-impl NetworkEventLogger for NoopLogger {
-    fn log(&mut self, _event: NetworkEvent) {}
-}

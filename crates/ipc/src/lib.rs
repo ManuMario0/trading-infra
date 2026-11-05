@@ -23,7 +23,6 @@
 
 pub mod address;
 pub mod blueprint;
-pub mod event;
 pub mod factory;
 pub mod macros;
 pub mod runner;
@@ -32,5 +31,6 @@ pub mod socket;
 pub(crate) mod backoff;
 pub(crate) mod dispatcher;
 pub(crate) mod engines;
+pub(crate) mod event;
 pub(crate) mod framing;
 pub(crate) mod transport;
