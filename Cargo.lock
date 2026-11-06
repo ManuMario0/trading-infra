@@ -270,7 +270,6 @@ version = "0.1.0"
 dependencies = [
  "cachec",
  "journal",
- "mio",
  "postcard",
  "serde",
 ]
@@ -364,6 +363,7 @@ version = "0.1.0"
 dependencies = [
  "ipc",
  "journal",
+ "serde",
  "serde_json",
  "service",
  "trading-sdk",

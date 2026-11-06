@@ -4,11 +4,12 @@
 //!
 //! ```no_run
 //! use ipc::make_ipc;
-//! use ipc::factory::{Aggregate, Bind, TCP};
+//! use ipc::factory::{Aggregate, Bind};
+//! use ipc::address::Address;
 //!
 //! // 1. Statically generate the IPC topology via the macro
 //! let (runner, blueprint, handle, data_in_socket) = make_ipc! {
-//!     DATA_IN: kind=Aggregate, role=Bind, ty=u64, addr="127.0.0.1:9000", transport=TCP
+//!     DATA_IN: kind=Aggregate, role=Bind, ty=u64, addr="127.0.0.1:9000".parse::<Address>().unwrap()
 //! };
 //!
 //! // 2. Spawn the network event loop (you need to set up a journal first to record events)
@@ -22,16 +23,14 @@
 
 pub mod address;
 pub mod blueprint;
-pub mod event;
 pub mod factory;
 pub mod macros;
 pub mod runner;
 pub mod socket;
-pub mod token;
 
 pub(crate) mod backoff;
 pub(crate) mod dispatcher;
 pub(crate) mod engines;
+pub(crate) mod event;
 pub(crate) mod framing;
-
-pub use mio::{Poll, Registry, Waker};
+pub(crate) mod transport;

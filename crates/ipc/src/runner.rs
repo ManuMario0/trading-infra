@@ -8,41 +8,30 @@
 //! no command channel for `Bind`/`Connect` operations. The only runtime control is shutdown.
 
 use std::io;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use journal::journal::Journal;
-use mio::{Events, Poll, Token, Waker};
 
 use crate::dispatcher::EngineDispatcher;
-
-// Token reserved for the shutdown waker (see init.rs / macro)
-pub const WAKER_TOKEN: Token = Token(usize::MAX);
 
 // ── IpcHandle ────────────────────────────────────────────────────────────────
 
 /// The user-facing control handle for the network thread.
 ///
 /// Cheap to clone. Thread-safe.
-#[derive(Clone)]
-pub struct IpcHandle {
-    pub(crate) waker: Arc<Waker>,
-}
+#[derive(Clone, Copy, Default)]
+pub struct IpcHandle {}
 
 impl IpcHandle {
-    pub fn new(waker: Arc<Waker>) -> Self {
-        Self { waker }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Request graceful shutdown of the network thread.
     ///
     /// The runner will finish the current poll iteration and then return.
-    pub fn shutdown(&self) -> io::Result<()> {
+    pub fn shutdown(&self) {
         SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
-        self.waker.wake()
     }
 }
 
@@ -53,54 +42,25 @@ static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 // ── IpcRunner ────────────────────────────────────────────────────────────────
 
 /// The network-thread entry point.
-///
-/// Owns the mio `Poll`, the `Events` buffer, and the statically-typed engines.
-/// Call `run()` from a dedicated `std::thread::spawn`.
 pub struct IpcRunner<T: EngineDispatcher> {
-    pub(crate) poll: Poll,
-    pub(crate) events: Events,
     pub(crate) engines: T,
-    /// Keeps the shutdown waker alive for the duration of the runner.
-    pub(crate) _shutdown_waker: Arc<Waker>,
 }
 
 impl<T: EngineDispatcher> IpcRunner<T> {
-    pub fn new(poll: Poll, engines: T, shutdown_waker: Arc<Waker>) -> Self {
-        Self {
-            poll,
-            events: Events::with_capacity(1024),
-            engines,
-            _shutdown_waker: shutdown_waker,
-        }
+    pub fn new(engines: T) -> Self {
+        Self { engines }
     }
 
     /// The blocking event loop.  Returns when shutdown is requested.
     pub fn run(mut self, mut journal: Journal) -> io::Result<()> {
-        // Maximum time to sleep in poll before checking reconnect timers.
-        let tick = Duration::from_millis(50);
-        let mut last_tick = std::time::Instant::now();
+        loop {
+            self.engines.on_tick(&mut journal);
 
-        'main_loop: loop {
-            self.poll.poll(&mut self.events, Some(tick))?;
-
-            for event in &self.events {
-                if event.token() == WAKER_TOKEN {
-                    if SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
-                        break 'main_loop;
-                    }
-                    self.engines.on_wake(&mut journal);
-                } else {
-                    // Zero cost static dispatch directly to the correct engine
-                    self.engines.on_event(event.token(), &mut journal);
-                }
+            if SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
+                break;
             }
 
-            // Reconnect timers every `tick` duration.
-            let now = std::time::Instant::now();
-            if now - last_tick >= tick {
-                self.engines.on_tick(&mut journal);
-                last_tick = now;
-            }
+            std::hint::spin_loop();
         }
 
         Ok(())

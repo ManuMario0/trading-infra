@@ -202,7 +202,10 @@ fn assign_ports(
                         reason: "no more ports available".to_string(),
                     },
                 })?;
-                addresses.push(Address::tcp("127.0.0.1", port.0));
+                addresses.push(Address::ip_v4(
+                    std::net::Ipv4Addr::new(127, 0, 0, 1),
+                    port.0,
+                ));
             }
             SocketRole::Connect => {
                 let addr = overrides

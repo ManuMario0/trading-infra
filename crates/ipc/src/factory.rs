@@ -7,17 +7,7 @@
 //! specialization of the network engines, guaranteeing perfectly optimal memory
 //! layouts with zero dynamic dispatch or monolithic enum overhead.
 
-use std::sync::Arc;
-
-use mio::Waker;
-
-use crate::token::TokenRegistry;
-
-// ── Protocol / Transports ──────────────────────────────────────────────────
-
-pub struct TCP;
-pub struct UDP;
-pub struct UDS; // Unix Domain Sockets
+use crate::address::Address;
 
 // ── Topology Kinds ─────────────────────────────────────────────────────────
 
@@ -49,10 +39,5 @@ pub trait SocketFactory<Tx, Rx = ()> {
     type Handle;
 
     /// Instantiates the specific IPC branch.
-    fn build(
-        name: &str,
-        addr: &str,
-        registry: TokenRegistry,
-        waker: Arc<Waker>,
-    ) -> (Self::Engine, Self::Handle);
+    fn build(name: &str, addr: Address) -> (Self::Engine, Self::Handle);
 }

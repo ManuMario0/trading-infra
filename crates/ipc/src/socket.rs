@@ -6,10 +6,7 @@
 //! - `SendSocket<T>` — user writes, network reads and sends.
 //! - `RecvSocket<T>` — network receives and writes here, user reads.
 
-use std::sync::Arc;
-
 use cachec::channel::spsc;
-use mio::Waker;
 use serde::Serialize;
 
 pub(crate) const CHANNEL_SIZE: usize = 1024;
@@ -43,13 +40,12 @@ pub enum SocketRole {
 /// meaning zero allocations on the hot path. Serialization is offloaded
 /// to the background network thread.
 pub struct SendSocket<T> {
-    pub(crate) channel: spsc::Producer<T, CHANNEL_SIZE>,
-    pub(crate) waker: Arc<Waker>,
+    channel: spsc::Producer<T, CHANNEL_SIZE>,
 }
 
 impl<T> SendSocket<T> {
-    pub(crate) fn new(channel: spsc::Producer<T, CHANNEL_SIZE>, waker: Arc<Waker>) -> Self {
-        Self { channel, waker }
+    pub(crate) fn new(channel: spsc::Producer<T, CHANNEL_SIZE>) -> Self {
+        Self { channel }
     }
 
     /// Enqueue `value` for sending.
@@ -59,9 +55,8 @@ impl<T> SendSocket<T> {
     /// blocking the critical path. The network thread handles tracking
     /// bottlenecks and reporting telemetry.
     #[inline(always)]
-    pub fn send(&mut self, value: T) {
-        let _ = self.channel.try_write(value);
-        let _ = self.waker.wake();
+    pub fn send(&mut self, value: T) -> Option<T> {
+        self.channel.try_write(value)
     }
 }
 
@@ -70,7 +65,7 @@ impl<T> SendSocket<T> {
 /// The network thread does the parsing and deserialization, and pushes
 /// native structs down this channel for the user to consume with zero logic.
 pub struct RecvSocket<T> {
-    pub(crate) channel: spsc::Consumer<T, CHANNEL_SIZE>,
+    channel: spsc::Consumer<T, CHANNEL_SIZE>,
 }
 
 impl<T> RecvSocket<T> {
