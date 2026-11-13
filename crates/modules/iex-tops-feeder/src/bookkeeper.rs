@@ -3,13 +3,13 @@
 //!
 //! I will want to compare after with SOA static preallocated slice implementation.
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Display,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Display;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use trading_sdk::{MarketDataBatch, journal::lineage::LineageId};
+use trading_sdk::journal::lineage::LineageId;
+use trading_sdk::model::market_data::MarketDataBatch;
+use trading_sdk::model::price::Price;
 
 use crate::parser::QuoteUpdateMessage;
 
@@ -134,8 +134,8 @@ pub struct SoaBookKeeper {
     /// 0 means the slot is empty.
     symbols: Vec<u64>,
 
-    bid_price: Vec<u64>,
-    ask_price: Vec<u64>,
+    bid_price: Vec<Price>,
+    ask_price: Vec<Price>,
     bid_size: Vec<u32>,
     ask_size: Vec<u32>,
 }
@@ -144,8 +144,8 @@ impl SoaBookKeeper {
     pub fn new() -> Self {
         Self {
             symbols: vec![0; SOA_CAPACITY],
-            bid_price: vec![0; SOA_CAPACITY],
-            ask_price: vec![0; SOA_CAPACITY],
+            bid_price: vec![0.0.into(); SOA_CAPACITY],
+            ask_price: vec![0.0.into(); SOA_CAPACITY],
             bid_size: vec![0; SOA_CAPACITY],
             ask_size: vec![0; SOA_CAPACITY],
         }
@@ -187,8 +187,8 @@ impl SoaBookKeeper {
         }
 
         // Update the SOA
-        self.bid_price[idx] = update.bid_price;
-        self.ask_price[idx] = update.ask_price;
+        self.bid_price[idx] = ((update.bid_price >> 2) as f64).into();
+        self.ask_price[idx] = ((update.ask_price >> 2) as f64).into();
         self.bid_size[idx] = update.bid_size;
         self.ask_size[idx] = update.ask_size;
     }
@@ -204,16 +204,13 @@ impl SoaBookKeeper {
             instrument_ids: vec![],
             bid_prices: vec![],
             ask_prices: vec![],
-            last_prices: vec![],
-            timestamps: vec![],
+            timestamp: 0,
         };
         for (index, instrument_id) in self.symbols.iter().enumerate() {
             if *instrument_id != 0 {
                 batch.instrument_ids.push(*instrument_id as usize);
                 batch.bid_prices.push(self.bid_price[index]);
                 batch.ask_prices.push(self.ask_price[index]);
-                batch.last_prices.push(self.ask_price[index]);
-                batch.timestamps.push(timestamp);
             }
         }
         batch
@@ -229,7 +226,7 @@ impl Display for SoaBookKeeper {
                 let symbol_bytes = sym_u64.to_le_bytes();
                 writeln!(
                     f,
-                    "\t{}: {} @ {} / {} @ {}",
+                    "\t{}: {} @ {:?} / {} @ {:?}",
                     String::from_utf8_lossy(&symbol_bytes),
                     self.bid_size[idx],
                     self.bid_price[idx],

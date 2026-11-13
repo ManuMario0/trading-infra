@@ -1,6 +1,6 @@
-use trading_sdk::Multiplexist;
 use trading_sdk::model::allocation::Allocation;
 use trading_sdk::model::ledger::LedgerUpdate;
+use trading_sdk::traits::multiplexist::Multiplexist;
 
 /// Kelly Multiplexer logic.
 ///

@@ -358,18 +358,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "manager"
-version = "0.1.0"
-dependencies = [
- "ipc",
- "journal",
- "serde",
- "serde_json",
- "service",
- "trading-sdk",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -857,7 +845,7 @@ checksum = "ab16f14aed21ee8bfd8ec22513f7287cd4a91aa92e44edfe2c17ddd004e92607"
 [[package]]
 name = "trading-sdk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ManuMario0/trading-sdk.git?branch=main#93f5f3fb4e0048b1f1bfc81d418dd2da6537203c"
+source = "git+ssh://git@github.com/ManuMario0/trading-sdk.git?branch=main#28e94b9a1279cfa49c1e345f89f97b7f825ce34c"
 dependencies = [
  "serde",
 ]

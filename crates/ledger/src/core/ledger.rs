@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use trading_sdk::InstrumentId;
+use trading_sdk::model::instrument::InstrumentId;
 
 use crate::core::error::LedgerError;
 use crate::model::account::{Account, AccountId, AccountName};

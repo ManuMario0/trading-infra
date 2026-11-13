@@ -12,8 +12,8 @@ use journal::journal::Journal;
 use service::env;
 use service::event::{ServiceEventKind, ServiceLifetimeEvent};
 use service::manifest::Manifest;
-use trading_sdk::MarketDataBatch;
 use trading_sdk::identity::ServiceId;
+use trading_sdk::model::market_data::MarketDataBatch;
 
 fn main() {
     let path = env::parse_or("PCAP_PATH", "".to_string());

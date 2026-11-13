@@ -15,10 +15,10 @@ use service::event::ServiceEventKind;
 use service::event::ServiceLifetimeEvent;
 use service::identity::Identity;
 use service::manifest::Manifest;
-use trading_sdk::ExecutionResult;
-use trading_sdk::MarketDataBatch;
 use trading_sdk::identity::ServiceId;
+use trading_sdk::model::execution::ExecutionResult;
 use trading_sdk::model::ledger::LedgerUpdate;
+use trading_sdk::model::market_data::MarketDataBatch;
 
 pub const MARKET_DATA_PIPE: &str = "market_data";
 pub const EXECUTION_RESULT_PIPE: &str = "execution_result";

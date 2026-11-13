@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
-use trading_sdk::InstrumentId;
+use trading_sdk::model::instrument::InstrumentId;
 
 use crate::model::balance::Balance;
 

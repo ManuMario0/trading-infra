@@ -18,10 +18,11 @@ use service::envelope::Envelope;
 use service::event::{ServiceEventKind, ServiceLifetimeEvent};
 use service::manifest::Manifest;
 use service::{env, identity::Identity};
-use trading_sdk::Allocation;
+use trading_sdk::identity::ServiceId;
+use trading_sdk::model::allocation::Allocation;
 use trading_sdk::model::context::Context;
 use trading_sdk::model::ledger::LedgerUpdate;
-use trading_sdk::{Multiplexist, identity::ServiceId};
+use trading_sdk::traits::multiplexist::Multiplexist;
 
 /// Metadata about the user module, injected by Forge at build time.
 pub struct ModuleInfo {

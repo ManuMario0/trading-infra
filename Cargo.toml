@@ -9,7 +9,6 @@ members = [
     "crates/modules/kelly-multiplexer",
     "crates/forge/wrappers/multiplexer",
     "crates/forge/wrappers/strategy",
-    "crates/forge/wrappers/manager",
     "crates/ledger", "crates/modules/dummy-strategy",
     "crates/modules/iex-tops-feeder",
 ]
